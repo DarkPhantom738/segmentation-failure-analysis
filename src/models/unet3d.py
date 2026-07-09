@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+LAYER_NAMES: Final[tuple[str, ...]] = (
+    "encoder1",
+    "encoder2",
+    "encoder3",
+    "encoder4",
+    "bottleneck",
+    "decoder4",
+    "decoder3",
+    "decoder2",
+    "decoder1",
+)
 
 
 class ConvBlock3D(nn.Module):
@@ -107,6 +121,227 @@ class UNet3D(nn.Module):
         logits = self.decode(skips, bottleneck)
         embedding = self.embedding_head(bottleneck)
         return logits, embedding, bottleneck
+
+    @staticmethod
+    def _global_avg_pool(features: torch.Tensor) -> torch.Tensor:
+        """Global average pool a (B, C, D, H, W) map to (B, C)."""
+        return F.adaptive_avg_pool3d(features, 1).flatten(1)
+
+    @staticmethod
+    def apply_activation_intervention(
+        tensor: torch.Tensor,
+        mode: str,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        """
+        Replace a layer activation map for ablation studies.
+
+        Modes:
+          - zero: all zeros
+          - mean: per-channel spatial mean broadcast (removes spatial detail)
+          - noise: Gaussian noise with per-channel matched variance
+        """
+        if mode == "zero":
+            return torch.zeros_like(tensor)
+        if mode == "mean":
+            channel_mean = tensor.mean(dim=(2, 3, 4), keepdim=True)
+            return channel_mean.expand_as(tensor)
+        if mode == "noise":
+            std = tensor.std(dim=(2, 3, 4), keepdim=True).clamp_min(1e-6)
+            noise = torch.randn(
+                tensor.shape,
+                device=tensor.device,
+                dtype=tensor.dtype,
+                generator=generator,
+            )
+            return noise * std
+        raise ValueError(f"Unknown intervention mode: {mode}")
+
+    @staticmethod
+    def activation_rho(original: torch.Tensor, ablated: torch.Tensor) -> float:
+        """Relative L2 perturbation: ||A - A'|| / ||A|| at the ablation site."""
+        num = torch.norm(original.float() - ablated.float())
+        den = torch.norm(original.float()).clamp_min(1e-8)
+        return float((num / den).item())
+
+    def forward_with_intervention(
+        self,
+        x: torch.Tensor,
+        ablate_layer: str,
+        intervention: str,
+        generator: torch.Generator | None = None,
+    ) -> tuple[torch.Tensor, float]:
+        """
+        Forward pass with a single-layer ablation.
+
+        Ablation semantics (U-Net pathway):
+          - encoder1–encoder4: **skip ablation** — full encoder runs normally;
+            only the skip tensor fused during decoding is replaced. Tests skip
+            contribution without corrupting deeper encoder states.
+          - bottleneck: replace bottleneck map, then decode.
+          - decoder4–decoder1: replace decoder block output, then continue
+            downstream decoding. Tests causal dependence on that decoder stage.
+        """
+        if ablate_layer not in LAYER_NAMES:
+            raise ValueError(f"Unknown layer: {ablate_layer}")
+
+        intervene = lambda t: self.apply_activation_intervention(
+            t, intervention, generator
+        )
+        rho = 0.0
+
+        # Full encoder path (always computed from real activations).
+        s1 = self.enc1(x)
+        s2 = self.enc2(self.pool1(s1))
+        s3 = self.enc3(self.pool2(s2))
+        s4 = self.enc4(self.pool3(s3))
+        bottleneck_map = self.bottleneck(self.pool4(s4))
+
+        # Skip tensors used at decode fusion (encoder ablation = skip-only).
+        if ablate_layer == "encoder1":
+            s1_skip = intervene(s1)
+            rho = self.activation_rho(s1, s1_skip)
+        else:
+            s1_skip = s1
+        if ablate_layer == "encoder2":
+            s2_skip = intervene(s2)
+            rho = self.activation_rho(s2, s2_skip)
+        else:
+            s2_skip = s2
+        if ablate_layer == "encoder3":
+            s3_skip = intervene(s3)
+            rho = self.activation_rho(s3, s3_skip)
+        else:
+            s3_skip = s3
+        if ablate_layer == "encoder4":
+            s4_skip = intervene(s4)
+            rho = self.activation_rho(s4, s4_skip)
+        else:
+            s4_skip = s4
+
+        if ablate_layer == "bottleneck":
+            bn_ablated = intervene(bottleneck_map)
+            rho = self.activation_rho(bottleneck_map, bn_ablated)
+            bottleneck_map = bn_ablated
+
+        d = self.up4(bottleneck_map)
+        d4 = self.dec4(torch.cat([d, s4_skip], dim=1))
+        if ablate_layer == "decoder4":
+            d4_ablated = intervene(d4)
+            rho = self.activation_rho(d4, d4_ablated)
+            d4 = d4_ablated
+
+        d = self.up3(d4)
+        d3 = self.dec3(torch.cat([d, s3_skip], dim=1))
+        if ablate_layer == "decoder3":
+            d3_ablated = intervene(d3)
+            rho = self.activation_rho(d3, d3_ablated)
+            d3 = d3_ablated
+
+        d = self.up2(d3)
+        d2 = self.dec2(torch.cat([d, s2_skip], dim=1))
+        if ablate_layer == "decoder2":
+            d2_ablated = intervene(d2)
+            rho = self.activation_rho(d2, d2_ablated)
+            d2 = d2_ablated
+
+        d = self.up1(d2)
+        d1 = self.dec1(torch.cat([d, s1_skip], dim=1))
+        if ablate_layer == "decoder1":
+            d1_ablated = intervene(d1)
+            rho = self.activation_rho(d1, d1_ablated)
+            d1 = d1_ablated
+
+        return self.seg_head(d1), rho
+
+    def forward_with_layer_embeddings(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """
+        Forward pass returning globally pooled vectors for each encoder/decoder block.
+
+        The bottleneck vector uses the same embedding_head as the standard forward
+        pass (GAP + linear), so it matches existing bottleneck embeddings.
+        """
+        s1 = self.enc1(x)
+        s2 = self.enc2(self.pool1(s1))
+        s3 = self.enc3(self.pool2(s2))
+        s4 = self.enc4(self.pool3(s3))
+        bottleneck_map = self.bottleneck(self.pool4(s4))
+
+        d = self.up4(bottleneck_map)
+        d4 = self.dec4(torch.cat([d, s4], dim=1))
+        d = self.up3(d4)
+        d3 = self.dec3(torch.cat([d, s3], dim=1))
+        d = self.up2(d3)
+        d2 = self.dec2(torch.cat([d, s2], dim=1))
+        d = self.up1(d2)
+        d1 = self.dec1(torch.cat([d, s1], dim=1))
+        logits = self.seg_head(d1)
+
+        layer_embeddings = {
+            "encoder1": self._global_avg_pool(s1),
+            "encoder2": self._global_avg_pool(s2),
+            "encoder3": self._global_avg_pool(s3),
+            "encoder4": self._global_avg_pool(s4),
+            "bottleneck": self.embedding_head(bottleneck_map),
+            "decoder4": self._global_avg_pool(d4),
+            "decoder3": self._global_avg_pool(d3),
+            "decoder2": self._global_avg_pool(d2),
+            "decoder1": self._global_avg_pool(d1),
+        }
+        return logits, layer_embeddings
+
+    def register_layer_hooks(self) -> "LayerActivationHooks":
+        """Register forward hooks that capture globally pooled layer activations."""
+        return LayerActivationHooks(self)
+
+
+class LayerActivationHooks:
+    """Forward hooks for multi-layer global-pooled activation extraction."""
+
+    def __init__(self, model: UNet3D) -> None:
+        self._model = model
+        self._cache: dict[str, torch.Tensor] = {}
+        self._handles: list[torch.utils.hooks.RemovableHandle] = []
+
+        hook_points = {
+            "encoder1": model.enc1,
+            "encoder2": model.enc2,
+            "encoder3": model.enc3,
+            "encoder4": model.enc4,
+            "bottleneck": model.bottleneck,
+            "decoder4": model.dec4,
+            "decoder3": model.dec3,
+            "decoder2": model.dec2,
+            "decoder1": model.dec1,
+        }
+
+        def _make_hook(name: str):
+            def hook(_module: nn.Module, _inputs: tuple, output: torch.Tensor) -> None:
+                if name == "bottleneck":
+                    self._cache[name] = model.embedding_head(output).detach()
+                else:
+                    self._cache[name] = model._global_avg_pool(output).detach()
+
+            return hook
+
+        for name, module in hook_points.items():
+            self._handles.append(module.register_forward_hook(_make_hook(name)))
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+    def pop(self) -> dict[str, torch.Tensor]:
+        captured = {name: self._cache[name].clone() for name in LAYER_NAMES if name in self._cache}
+        self.clear()
+        return captured
+
+    def remove(self) -> None:
+        for handle in self._handles:
+            handle.remove()
+        self._handles.clear()
+        self.clear()
 
 
 class DiceCrossEntropyLoss(nn.Module):
