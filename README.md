@@ -260,6 +260,104 @@ bash scripts/run_10hour_pipeline.sh     # full dataset (long-running)
 
 ---
 
+## Summary: What Embeddings Add—and Why It Matters
+
+This section synthesizes our **current** evidence on a practical question: *if uncertainty is already a strong quality signal, why include latent representations at all?*
+
+### What we observe for severe failures (Dice &lt; 0.80)
+
+On the primary 533-case validation run (17 bad cases, stratified 5-fold CV, logistic regression):
+
+| Model | AUROC | Interpretation |
+|-------|-------|----------------|
+| Uncertainty only | **0.886** | Strong baseline—uncertainty catches most catastrophic failures |
+| Embeddings only | 0.764 | Weaker alone—geometry without uncertainty is insufficient |
+| **Uncertainty + embeddings** | **0.909** | **Best**—modest but consistent improvement (+0.023 AUROC) |
+
+**Important nuance:** Embeddings do **not** outperform uncertainty in isolation. The finding is that they provide **complementary** signal when combined. For flagging the worst segmentations (Dice &lt; 0.80), the combined model is currently our best deployable estimator.
+
+The calibration plot below shows that combined out-of-fold probabilities track observed bad-case rates slightly more faithfully than uncertainty alone—useful when the goal is ranking cases for review, not estimating exact Dice.
+
+![Calibration: uncertainty-only vs combined](docs/figures/calibration_comparison.png)
+
+### What information embeddings encode that uncertainty misses
+
+Mechanistic analysis (`analyze_embedding_signal.py`) shows that bottleneck dimensions correlate most strongly with **morphology and anatomy**, not with deployable entropy:
+
+| Embedding feature | Correlates with | Pearson *r* (133 val) |
+|-------------------|-----------------|----------------------|
+| `emb_89` | Boundary-error fraction | **+0.43** |
+| `emb_11` | Dice | **−0.42** |
+| `emb_38` | GT tumor volume | **+0.36** |
+| `emb_38` | Boundary-error fraction | **+0.38** |
+| `pc_4` (PCA) | Tumor volume + boundary error | **~0.36** |
+| `emb_74` | Mean entropy (whole) | +0.39 |
+
+The **strongest** embedding–outcome associations are with **boundary complexity, tumor burden, and failure morphology**. Entropy-correlated dimensions exist (`emb_74`, `emb_69`) but are not the dominant story. This supports the hypothesis that the bottleneck compresses **structural context** about the case—how large the tumor is, how boundary-heavy errors tend to be—not a second copy of the voxelwise uncertainty map.
+
+The UMAP below shows that Dice varies continuously across embedding space while failure types intermingle; there is no single “failure island,” but **local geometry still carries case-specific structure** that a classifier can exploit alongside uncertainty.
+
+![UMAP colored by Dice in latent space](docs/figures/umap_colored_by_dice.png)
+
+Uncertainty vs Dice (deployable entropy summaries) explains much of the variance, but **several bad cases sit in a low-entropy, low-Dice region** that uncertainty alone under-ranks:
+
+![Deployable uncertainty vs Dice](docs/figures/scatter_uncertainty_vs_dice.png)
+
+### Case-level evidence: which failures get “rescued”?
+
+We split the 17 bad cases by out-of-fold classifier behavior:
+
+| Group | Definition | *n* | Role |
+|-------|------------|-----|------|
+| **A** | Uncertainty catches (P_bad ≥ 0.5) | 8 | Obvious failures—high uncertainty, often very low Dice |
+| **B** | Uncertainty misses, **combined rescues** | 2 | **Key cases**—look confident to uncertainty, flagged by geometry |
+| **D** | Both miss | 7 | Often borderline Dice (0.70–0.78); threshold-limited |
+
+**Group B cases** (`BraTS2021_00380`, `BraTS2021_00555`):
+
+| Case | Dice | P_unc | P_combined | Dominant failure | Boundary-error frac. | Mean entropy |
+|------|------|-------|------------|------------------|----------------------|--------------|
+| 00380 | 0.751 | 0.30 | **0.86** | boundary_error | 0.54 | 0.028 |
+| 00555 | 0.682 | 0.50 | **0.86** | boundary_error | 0.53 | 0.030 |
+
+Both are **boundary-heavy, low-entropy failures**—morphologically difficult but not flagged as uncertain. The combined model assigns P(bad) ≈ 0.86 using embedding geometry that uncertainty alone does not surface.
+
+Comparing Group A vs Group B across morphology (boxplots below):
+
+- **Boundary-error fraction:** higher in Group B (mean 0.54 vs 0.44)—the failures embeddings help with are structurally boundary-dominated.
+- **Mean entropy:** essentially **unchanged** (0.029 vs 0.029)—rescued cases are not high-uncertainty outliers.
+- **False-negative voxels:** directionally higher in Group B (919 vs 412)—missed tumor tissue without corresponding entropy spikes.
+
+![Group A vs Group B morphology comparison](docs/figures/rescued_bad_cases_morphology_comparison.png)
+
+This is early evidence with **n = 2** rescued cases; we treat it as hypothesis-generating, not proven. The full-dataset run (375 validation cases) will test whether the pattern holds at scale.
+
+### Why this is useful (without overselling)
+
+In deployment, clinicians and QA workflows need to **prioritize cases for review** when ground truth is unavailable. Uncertainty is the right first signal—it catches most clear failures. Our results suggest a **second line of defense**:
+
+1. **Uncertainty** flags cases where the model knows it is unsure.
+2. **Latent geometry** flags a subset of cases where the model appears confident but the **case-level anatomy** resembles historically difficult segmentations—especially boundary-heavy morphology.
+
+That combination is clinically relevant because:
+
+- **Review budget is finite.** A small AUROC gain (+0.02–0.03) can still reorder which cases reach human review first.
+- **Confident errors are especially dangerous.** A segmentation that looks stable (low entropy) but is wrong is less likely to be caught by uncertainty-only QA.
+- **The signal is interpretable.** Embeddings correlate with measurable morphology (boundary error, tumor volume), not opaque scores—supporting mechanistic follow-up.
+
+We do **not** claim embeddings replace uncertainty or that latent geometry solves failure detection. We claim that **internal representations encode morphological structure that deployable uncertainty summaries partially miss**, and that combining the two improves detection of severe failures in our current BraTS experiments.
+
+### What would make this a stronger scientific claim
+
+- Replicate rescued-case patterns on the **375-case** full-data holdout (in progress)
+- Formal significance testing with more bad cases per subgroup
+- Per-dimension probing to link `emb_89`-style dimensions to boundary morphology
+- External validation beyond BraTS 2021
+
+Until then, label these results **current experimental observations**—directionally consistent, modest in effect size, and mechanistically plausible.
+
+---
+
 ## Collaboration
 
 This repository documents an **ongoing research effort** into the relationship between latent representations, uncertainty estimation, and segmentation quality. We are actively iterating on experiments, analysis methods, and interpretation.
