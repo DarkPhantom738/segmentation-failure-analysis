@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+
+# Data and experiment outputs
+data/
+outputs/
+outputs_fast/
+outputs_midscale/
+outputs_fullscale/
+outputs_30min/
+outputs_10hour/
