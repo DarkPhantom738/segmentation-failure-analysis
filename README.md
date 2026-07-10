@@ -164,14 +164,6 @@ This is a mechanistic readout-versus-control analysis, not a clinical correction
 - Recoverability, functional dependence on intact spatial activations (ablation), and selective controllability are distinct and can diverge.
 - Ablation layer rankings are stable under matched vs TTA baselines (Spearman ρ = 1.000).
 
-## What this study does not establish
-
-- Universal claims across architectures, datasets, or training regimes.
-- Clinical utility, deployment readiness, or automatic segmentation repair.
-- That whole-tumor voxel count is uncontrollable in general—only that this probe direction at decoder2 fails the matched-random screen.
-- That whole-layer ablation isolates any single probe direction as causally necessary.
-- Formal significance of the 30-case random-direction comparisons.
-
 ---
 
 ## Limitations
@@ -181,18 +173,6 @@ This is a mechanistic readout-versus-control analysis, not a clinical correction
 - Random-control screens are small exploratory checks, not powered hypothesis tests.
 - Whole-layer ablation is destructive and not property-specific; it measures functional dependence on intact spatial activations, not probe-direction necessity.
 - Checkpoints, embeddings, and raw predictions are not stored in git.
-
----
-
-## Manuscript status
-
-Probing (375 cases), whole-layer ablation with matched-baseline rescoring (375 cases), representation editing (375 cases), and matched-random probe screens (30 cases each) are complete. Manuscript construction is beginning.
-
----
-
-## Data provenance
-
-Every numerical result stated in this README is copied from a committed file under `outputs_10hour/` (cited inline). This repository does **not** include model checkpoints, layer embeddings, or raw predictions required to re-derive those numbers from scratch. To reproduce, run the commands below locally and compare against the committed CSVs.
 
 ---
 
