@@ -6,12 +6,34 @@ __pycache__/
 .mypy_cache/
 .DS_Store
 
-# Data and experiment outputs
+# Data
 data/
+
+# Experiment outputs (default: ignore)
 outputs/
 outputs_fast/
 outputs_midscale/
 outputs_fullscale/
 outputs_30min/
-outputs_10hour/
 outputs_5epoch_533/
+
+# outputs_10hour: ignore bulk artifacts, track curated findings below
+outputs_10hour/*
+!outputs_10hour/failure_tables/
+!outputs_10hour/layer_holdout_recoverability/
+!outputs_10hour/layer_analysis/
+!outputs_10hour/semantic_directions/
+!outputs_10hour/representation_editing/
+!outputs_10hour/edema_probe_screen/
+!outputs_10hour/volume_probe_screen/
+!outputs_10hour/layer_interventions/
+
+# Re-ignore bulky subtrees within allowed paths
+outputs_10hour/layer_holdout_recoverability/seed_*/
+outputs_10hour/representation_editing/examples/
+outputs_10hour/representation_editing/interim*/
+outputs_10hour/layer_interventions/predictions/
+outputs_10hour/layer_interventions/interim*/
+outputs_10hour/semantic_directions/*
+!outputs_10hour/semantic_directions/directions/
+!outputs_10hour/semantic_directions/directions/**

@@ -158,6 +158,248 @@ class UNet3D(nn.Module):
         raise ValueError(f"Unknown intervention mode: {mode}")
 
     @staticmethod
+    def apply_channel_perturbation(
+        tensor: torch.Tensor,
+        channel_delta: torch.Tensor,
+        alpha: float,
+    ) -> torch.Tensor:
+        """
+        Add alpha * per-channel spatially constant perturbation to an activation map.
+
+        ``channel_delta`` is a unit direction in channel space (C,) or (1,C,1,1,1).
+        This implements A' = A + alpha * GAP*(delta_v) with spatially constant lift.
+        """
+        if channel_delta.dim() == 1:
+            delta = channel_delta.view(1, -1, 1, 1, 1)
+        else:
+            delta = channel_delta
+        if delta.shape[1] != tensor.shape[1]:
+            raise ValueError(
+                f"channel_delta has {delta.shape[1]} channels but tensor has {tensor.shape[1]}"
+            )
+        return tensor + float(alpha) * delta.to(device=tensor.device, dtype=tensor.dtype)
+
+    @staticmethod
+    def activation_rms(tensor: torch.Tensor) -> torch.Tensor:
+        """Root-mean-square over all elements of an activation map."""
+        return torch.sqrt(torch.mean(tensor.float().pow(2)))
+
+    @staticmethod
+    def rms_perturbation_ratio(
+        original: torch.Tensor, perturbed: torch.Tensor
+    ) -> torch.Tensor:
+        """RMS(A' - A) / RMS(A)."""
+        diff = perturbed.float() - original.float()
+        num = torch.sqrt(torch.mean(diff.pow(2)))
+        den = UNet3D.activation_rms(original).clamp_min(1e-8)
+        return num / den
+
+    @staticmethod
+    def alpha_from_rms_edit_ratio(
+        edit_ratio: float,
+        activation: torch.Tensor,
+        channel_delta: torch.Tensor,
+    ) -> float:
+        """
+        Choose alpha so RMS(A + alpha*Delta - A) / RMS(A) == |edit_ratio|.
+
+        ``channel_delta`` must be unit L2-normalized in channel space and broadcast
+        spatially (spatially constant per channel).
+        """
+        if edit_ratio == 0.0:
+            return 0.0
+        n_channels = int(activation.shape[1])
+        rms_activation = float(UNet3D.activation_rms(activation).item())
+        # For unit channel direction broadcast: RMS(Delta) = |alpha| / sqrt(C).
+        alpha_mag = abs(float(edit_ratio)) * rms_activation * (n_channels**0.5)
+        sign = -1.0 if edit_ratio < 0 else 1.0
+        return sign * alpha_mag
+
+    def forward_with_rms_representation_edit(
+        self,
+        x: torch.Tensor,
+        edit_layer: str,
+        channel_delta: torch.Tensor,
+        edit_ratio: float,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor | float]]:
+        """
+        Forward with per-patch RMS-budgeted editing at one layer.
+
+        Returns logits and edit-site statistics (GAP readout before/after, RMS ratio).
+        """
+        if edit_layer not in LAYER_NAMES:
+            raise ValueError(f"Unknown layer: {edit_layer}")
+
+        alpha = 0.0
+        gap_before: torch.Tensor | None = None
+        gap_after: torch.Tensor | None = None
+        rms_activation = self.activation_rms(torch.zeros(1, device=x.device))
+        stats_cache: dict[str, torch.Tensor] = {}
+
+        def maybe_edit(name: str, tensor: torch.Tensor) -> torch.Tensor:
+            nonlocal alpha, gap_before, gap_after, rms_activation
+            if edit_layer != name:
+                return tensor
+            gap_before = self._global_avg_pool(tensor)
+            rms_activation = self.activation_rms(tensor)
+            alpha = self.alpha_from_rms_edit_ratio(edit_ratio, tensor, channel_delta)
+            edited = self.apply_channel_perturbation(tensor, channel_delta, alpha)
+            gap_after = self._global_avg_pool(edited)
+            stats_cache["original"] = tensor
+            stats_cache["edited"] = edited
+            return edited
+
+        s1 = self.enc1(x)
+        s2 = self.enc2(self.pool1(s1))
+        s3 = self.enc3(self.pool2(s2))
+        s4 = self.enc4(self.pool3(s3))
+        bottleneck_map = self.bottleneck(self.pool4(s4))
+
+        s1_skip = maybe_edit("encoder1", s1)
+        s2_skip = maybe_edit("encoder2", s2)
+        s3_skip = maybe_edit("encoder3", s3)
+        s4_skip = maybe_edit("encoder4", s4)
+        bottleneck_map = maybe_edit("bottleneck", bottleneck_map)
+
+        d = self.up4(bottleneck_map)
+        d4 = self.dec4(torch.cat([d, s4_skip], dim=1))
+        d4 = maybe_edit("decoder4", d4)
+
+        d = self.up3(d4)
+        d3 = self.dec3(torch.cat([d, s3_skip], dim=1))
+        d3 = maybe_edit("decoder3", d3)
+
+        d = self.up2(d3)
+        d2 = self.dec2(torch.cat([d, s2_skip], dim=1))
+        d2 = maybe_edit("decoder2", d2)
+
+        d = self.up1(d2)
+        d1 = self.dec1(torch.cat([d, s1_skip], dim=1))
+        d1 = maybe_edit("decoder1", d1)
+
+        logits = self.seg_head(d1)
+
+        if gap_before is None or gap_after is None:
+            raise RuntimeError(f"Edit layer {edit_layer} was not reached in forward pass")
+
+        if edit_ratio == 0.0:
+            realized = torch.tensor(0.0, device=x.device)
+        else:
+            realized = self.rms_perturbation_ratio(
+                stats_cache["original"], stats_cache["edited"]
+            )
+
+        stats: dict[str, torch.Tensor | float] = {
+            "gap_before": gap_before,
+            "gap_after": gap_after,
+            "rms_activation": rms_activation,
+            "realized_rms_ratio": realized,
+            "alpha": alpha,
+        }
+        return logits, stats
+
+    def forward_to_decoder1(self, x: torch.Tensor) -> torch.Tensor:
+        """Run encoder + decoder up to (and including) decoder1; return d1 activations."""
+        s1 = self.enc1(x)
+        s2 = self.enc2(self.pool1(s1))
+        s3 = self.enc3(self.pool2(s2))
+        s4 = self.enc4(self.pool3(s3))
+        bottleneck_map = self.bottleneck(self.pool4(s4))
+
+        d = self.up4(bottleneck_map)
+        d4 = self.dec4(torch.cat([d, s4], dim=1))
+        d = self.up3(d4)
+        d3 = self.dec3(torch.cat([d, s3], dim=1))
+        d = self.up2(d3)
+        d2 = self.dec2(torch.cat([d, s2], dim=1))
+        d = self.up1(d2)
+        return self.dec1(torch.cat([d, s1], dim=1))
+
+    def forward_from_decoder1(self, d1: torch.Tensor) -> torch.Tensor:
+        """Decode from decoder1 activations through the segmentation head only."""
+        return self.seg_head(d1)
+
+    def forward_to_decoder2(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Run encoder + decoder through decoder2; return (d2, s1 skip for dec1)."""
+        s1 = self.enc1(x)
+        s2 = self.enc2(self.pool1(s1))
+        s3 = self.enc3(self.pool2(s2))
+        s4 = self.enc4(self.pool3(s3))
+        bottleneck_map = self.bottleneck(self.pool4(s4))
+
+        d = self.up4(bottleneck_map)
+        d4 = self.dec4(torch.cat([d, s4], dim=1))
+        d = self.up3(d4)
+        d3 = self.dec3(torch.cat([d, s3], dim=1))
+        d = self.up2(d3)
+        d2 = self.dec2(torch.cat([d, s2], dim=1))
+        return d2, s1
+
+    def forward_from_decoder2(self, d2: torch.Tensor, s1_skip: torch.Tensor) -> torch.Tensor:
+        """Decode from decoder2 activations through decoder1 and seg_head."""
+        d = self.up1(d2)
+        d1 = self.dec1(torch.cat([d, s1_skip], dim=1))
+        return self.seg_head(d1)
+
+    def forward_with_representation_edit(
+        self,
+        x: torch.Tensor,
+        edit_layer: str,
+        channel_delta: torch.Tensor,
+        alpha: float,
+    ) -> torch.Tensor:
+        """
+        Forward pass with additive semantic editing on one layer's activation tensor.
+
+        Editing sites mirror causal ablation placement:
+          - encoder1–4: **skip-path editing** — the encoder runs normally; only the
+            skip tensor fused at decode is perturbed. This matches probe readouts
+            (GAP of encoder block output) but does NOT alter deeper encoder states.
+          - bottleneck: perturb bottleneck feature map, then decode.
+          - decoder4–1: perturb decoder block output, then continue downstream.
+        """
+        if edit_layer not in LAYER_NAMES:
+            raise ValueError(f"Unknown layer: {edit_layer}")
+
+        edit = lambda t: self.apply_channel_perturbation(t, channel_delta, alpha)
+
+        s1 = self.enc1(x)
+        s2 = self.enc2(self.pool1(s1))
+        s3 = self.enc3(self.pool2(s2))
+        s4 = self.enc4(self.pool3(s3))
+        bottleneck_map = self.bottleneck(self.pool4(s4))
+
+        s1_skip = edit(s1) if edit_layer == "encoder1" else s1
+        s2_skip = edit(s2) if edit_layer == "encoder2" else s2
+        s3_skip = edit(s3) if edit_layer == "encoder3" else s3
+        s4_skip = edit(s4) if edit_layer == "encoder4" else s4
+
+        if edit_layer == "bottleneck":
+            bottleneck_map = edit(bottleneck_map)
+
+        d = self.up4(bottleneck_map)
+        d4 = self.dec4(torch.cat([d, s4_skip], dim=1))
+        if edit_layer == "decoder4":
+            d4 = edit(d4)
+
+        d = self.up3(d4)
+        d3 = self.dec3(torch.cat([d, s3_skip], dim=1))
+        if edit_layer == "decoder3":
+            d3 = edit(d3)
+
+        d = self.up2(d3)
+        d2 = self.dec2(torch.cat([d, s2_skip], dim=1))
+        if edit_layer == "decoder2":
+            d2 = edit(d2)
+
+        d = self.up1(d2)
+        d1 = self.dec1(torch.cat([d, s1_skip], dim=1))
+        if edit_layer == "decoder1":
+            d1 = edit(d1)
+
+        return self.seg_head(d1)
+
+    @staticmethod
     def activation_rho(original: torch.Tensor, ablated: torch.Tensor) -> float:
         """Relative L2 perturbation: ||A - A'|| / ||A|| at the ablation site."""
         num = torch.norm(original.float() - ablated.float())

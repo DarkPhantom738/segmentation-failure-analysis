@@ -1,0 +1,18 @@
+{
+  "layer": "decoder2",
+  "property_key": "boundary_error_fraction",
+  "property_label": "Boundary error fraction",
+  "eval_metric": "boundary_error_fraction",
+  "oof_r2": 0.34892044534159894,
+  "oof_mae": 0.13330251203545523,
+  "n_cases": 375,
+  "cv_folds": 5,
+  "probe_coef_scaled": null,
+  "scaler_mean": null,
+  "scaler_scale": null,
+  "gap_delta_unscaled": null,
+  "activation_direction": null,
+  "readout_type": "gap",
+  "embedding_dim": 64,
+  "activation_channels": 64
+}

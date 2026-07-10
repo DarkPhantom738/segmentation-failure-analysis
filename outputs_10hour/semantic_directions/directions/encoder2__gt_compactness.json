@@ -1,0 +1,18 @@
+{
+  "layer": "encoder2",
+  "property_key": "gt_compactness",
+  "property_label": "Boundary complexity",
+  "eval_metric": "boundary_complexity",
+  "oof_r2": 0.22415211557482606,
+  "oof_mae": 0.8442853285865831,
+  "n_cases": 375,
+  "cv_folds": 5,
+  "probe_coef_scaled": null,
+  "scaler_mean": null,
+  "scaler_scale": null,
+  "gap_delta_unscaled": null,
+  "activation_direction": null,
+  "readout_type": "gap",
+  "embedding_dim": 64,
+  "activation_channels": 64
+}

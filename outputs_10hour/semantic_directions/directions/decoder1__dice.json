@@ -1,0 +1,18 @@
+{
+  "layer": "decoder1",
+  "property_key": "dice",
+  "property_label": "Dice",
+  "eval_metric": "dice",
+  "oof_r2": 0.5647979596859799,
+  "oof_mae": 0.05451649957688906,
+  "n_cases": 375,
+  "cv_folds": 5,
+  "probe_coef_scaled": null,
+  "scaler_mean": null,
+  "scaler_scale": null,
+  "gap_delta_unscaled": null,
+  "activation_direction": null,
+  "readout_type": "gap",
+  "embedding_dim": 32,
+  "activation_channels": 32
+}

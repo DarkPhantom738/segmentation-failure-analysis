@@ -1,0 +1,18 @@
+{
+  "layer": "encoder3",
+  "property_key": "gt_wt_voxels",
+  "property_label": "Whole-tumor volume",
+  "eval_metric": "tumor_volume",
+  "oof_r2": 0.7106356196123003,
+  "oof_mae": 3001.164078125,
+  "n_cases": 375,
+  "cv_folds": 5,
+  "probe_coef_scaled": null,
+  "scaler_mean": null,
+  "scaler_scale": null,
+  "gap_delta_unscaled": null,
+  "activation_direction": null,
+  "readout_type": "gap",
+  "embedding_dim": 128,
+  "activation_channels": 128
+}

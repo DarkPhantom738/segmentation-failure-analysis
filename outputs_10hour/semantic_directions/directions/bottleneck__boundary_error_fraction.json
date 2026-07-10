@@ -1,0 +1,18 @@
+{
+  "layer": "bottleneck",
+  "property_key": "boundary_error_fraction",
+  "property_label": "Boundary error fraction",
+  "eval_metric": "boundary_error_fraction",
+  "oof_r2": 0.21496135816966977,
+  "oof_mae": 0.14409611643037748,
+  "n_cases": 375,
+  "cv_folds": 5,
+  "probe_coef_scaled": null,
+  "scaler_mean": null,
+  "scaler_scale": null,
+  "gap_delta_unscaled": null,
+  "activation_direction": null,
+  "readout_type": "linear_gap",
+  "embedding_dim": 128,
+  "activation_channels": 512
+}

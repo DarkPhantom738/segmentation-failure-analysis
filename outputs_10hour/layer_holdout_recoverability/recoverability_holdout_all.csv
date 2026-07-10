@@ -1,0 +1,343 @@
+layer,target,target_label,split,n_cases,cv_folds,r2,mae,spearman,split_phase
+encoder1,centroid_x,Centroid X,selection_oof,187,5.0,-0.029994431151579404,0.09555072039769075,-0.05774813825199388,selection_oof
+encoder1,centroid_y,Centroid Y,selection_oof,187,5.0,0.020319331633641302,0.09836894855523018,0.17404270000256922,selection_oof
+encoder1,centroid_z,Centroid Z,selection_oof,187,5.0,-0.010284121031808757,0.1628305013385016,-0.04050334178720468,selection_oof
+encoder1,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.5455736210091646,3603.6016982787432,0.715162058861252,selection_oof
+encoder1,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.406008506894315,0.44322261766913706,0.7004121264173174,selection_oof
+encoder1,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.4105951214758865,2967.0446085394383,0.6286768180507034,selection_oof
+encoder1,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.48946661314123896,1116.928577117104,0.7155977866559422,selection_oof
+encoder1,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,0.13515454616284772,1646.9975807883523,0.33892846235297736,selection_oof
+encoder1,gt_edema_frac,Edema fraction,selection_oof,187,5.0,0.03775778219703385,0.1617545345354586,0.3919543857974962,selection_oof
+encoder1,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,0.3071780086304343,0.09706612651084293,0.5939627059982514,selection_oof
+encoder1,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,0.05896501160414169,0.11427526446533502,0.17023568605590655,selection_oof
+encoder1,gt_compactness,Boundary complexity,selection_oof,187,5.0,0.05771777347833651,0.946146969691574,0.3479220726788251,selection_oof
+encoder1,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.38422555929638114,0.05065174174320851,0.6916710404134201,selection_oof
+encoder1,gt_elongation,Elongation,selection_oof,187,5.0,-0.031846672515402075,1.4444822283516787,0.06990960107759334,selection_oof
+encoder1,gt_n_components,Multifocality (# components),selection_oof,187,5.0,0.023546811872072415,3.096805665582259,0.12337314228375107,selection_oof
+encoder1,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,0.10455501358036645,707.9490206305356,0.29244796099462805,selection_oof
+encoder1,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,0.0003085773239518419,799.2545503830527,0.20578843634595778,selection_oof
+encoder1,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.16102903413673075,0.15761187677697447,0.44090895810538694,selection_oof
+encoder1,dice,Dice,selection_oof,187,5.0,0.220416299609982,0.06140842215042495,0.6292671557922478,selection_oof
+encoder2,centroid_x,Centroid X,selection_oof,187,5.0,0.0015604552562067386,0.09340007560064978,0.16652597271516084,selection_oof
+encoder2,centroid_y,Centroid Y,selection_oof,187,5.0,0.37838713218028874,0.0743301256279701,0.6237874322375111,selection_oof
+encoder2,centroid_z,Centroid Z,selection_oof,187,5.0,0.1860508875263538,0.12919317004332706,0.4470580894740126,selection_oof
+encoder2,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.6182743627091427,3303.470977293616,0.781477571615248,selection_oof
+encoder2,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.49556079707123246,0.4064753027544198,0.7474623463817116,selection_oof
+encoder2,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.47775714493454213,2886.9826908213568,0.6523125060218284,selection_oof
+encoder2,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.6614799650901407,901.7865988991477,0.8448846580814282,selection_oof
+encoder2,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,0.23229095466559913,1501.7975852272727,0.49512532845606616,selection_oof
+encoder2,gt_edema_frac,Edema fraction,selection_oof,187,5.0,0.230714203947068,0.1467591052399555,0.5313661872061485,selection_oof
+encoder2,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,0.3502231339553332,0.09161133662279479,0.618342744647649,selection_oof
+encoder2,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,0.22969971942156953,0.09975989025106603,0.4418928473521859,selection_oof
+encoder2,gt_compactness,Boundary complexity,selection_oof,187,5.0,0.10061643408355991,0.930717611683058,0.38244286296286784,selection_oof
+encoder2,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.48272761712348367,0.04761296920656842,0.7239346103450427,selection_oof
+encoder2,gt_elongation,Elongation,selection_oof,187,5.0,-0.021834822177871027,1.4605466484814056,0.06508685710510573,selection_oof
+encoder2,gt_n_components,Multifocality (# components),selection_oof,187,5.0,0.00297352327775946,3.1252214513360497,0.18814470318689458,selection_oof
+encoder2,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,0.010954040955728384,810.3596269740141,0.30849539585052005,selection_oof
+encoder2,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,0.10473328376778468,760.6957573712191,0.37737239271800743,selection_oof
+encoder2,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.20043278979631463,0.15330260922605912,0.42991036755268025,selection_oof
+encoder2,dice,Dice,selection_oof,187,5.0,0.3055003708142139,0.05891728313861319,0.6628630362733476,selection_oof
+encoder3,centroid_x,Centroid X,selection_oof,187,5.0,0.5133161881932222,0.05841113462499092,0.7451891844277488,selection_oof
+encoder3,centroid_y,Centroid Y,selection_oof,187,5.0,0.6155627815510298,0.05399142907471281,0.8108486047442,selection_oof
+encoder3,centroid_z,Centroid Z,selection_oof,187,5.0,0.7120949727734203,0.06980528052785757,0.8516345578600817,selection_oof
+encoder3,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.6641413672435184,3243.7910861255014,0.8336285613747173,selection_oof
+encoder3,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.7169079716356017,0.3208107278884754,0.8382622882078039,selection_oof
+encoder3,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.5130226797927755,2919.8948458911264,0.7324007762646052,selection_oof
+encoder3,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.5326931361532279,1021.0715619255515,0.7929808882513782,selection_oof
+encoder3,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,0.24618241315092082,1512.0847605332972,0.5520073554472225,selection_oof
+encoder3,gt_edema_frac,Edema fraction,selection_oof,187,5.0,0.2293072818909443,0.14036447953576947,0.5655052686826275,selection_oof
+encoder3,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,0.06831306174987262,0.11188564759319074,0.41678029338547745,selection_oof
+encoder3,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,0.25351782132780154,0.10276181828064307,0.4313727469854935,selection_oof
+encoder3,gt_compactness,Boundary complexity,selection_oof,187,5.0,0.13178000807925583,0.9039217363464639,0.39533471091063244,selection_oof
+encoder3,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.4491082446080409,0.05043652645115252,0.6878851496922473,selection_oof
+encoder3,gt_elongation,Elongation,selection_oof,187,5.0,0.0029745070889778402,1.4178962379704985,0.10130515049970823,selection_oof
+encoder3,gt_n_components,Multifocality (# components),selection_oof,187,5.0,0.007700205594377896,3.042378806812878,0.09984088572451387,selection_oof
+encoder3,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,-0.08768321117542688,879.3591413038937,0.24436529867440085,selection_oof
+encoder3,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,0.08755610403528269,756.6854345964238,0.440636504120777,selection_oof
+encoder3,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.2833470337926929,0.14433262180319395,0.432507231499298,selection_oof
+encoder3,dice,Dice,selection_oof,187,5.0,0.38888276709159464,0.05628000352516163,0.6359709167250852,selection_oof
+encoder4,centroid_x,Centroid X,selection_oof,187,5.0,0.8255024355177805,0.03545279106257943,0.9046241819870146,selection_oof
+encoder4,centroid_y,Centroid Y,selection_oof,187,5.0,0.7984003933170134,0.037633005339043214,0.8970120274977152,selection_oof
+encoder4,centroid_z,Centroid Z,selection_oof,187,5.0,0.8851046646501748,0.04352908174561341,0.9090964145064029,selection_oof
+encoder4,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.4381313072483285,4226.639337713068,0.7027234844158413,selection_oof
+encoder4,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.5143650127985021,0.4339847684297354,0.7276162319910514,selection_oof
+encoder4,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.08903632951566653,3988.8770549590577,0.3501199722895306,selection_oof
+encoder4,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.4246233576770485,1182.5090012167864,0.7193488493272508,selection_oof
+encoder4,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,0.09937685214084391,1620.0656013692765,0.4075748497844172,selection_oof
+encoder4,gt_edema_frac,Edema fraction,selection_oof,187,5.0,-0.09533413662610979,0.18217910215755698,-0.06707614723683197,selection_oof
+encoder4,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,0.015428537356513172,0.11993416845032293,0.21525638038537867,selection_oof
+encoder4,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,-0.03719420958253372,0.12079486203168123,-0.13826063699545046,selection_oof
+encoder4,gt_compactness,Boundary complexity,selection_oof,187,5.0,-0.007565956291548215,1.0126437650418942,0.051798619241794186,selection_oof
+encoder4,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.3124350587850735,0.055922473007868366,0.5938856855526887,selection_oof
+encoder4,gt_elongation,Elongation,selection_oof,187,5.0,-0.012882322565529902,1.4321798143341176,0.12474720967191394,selection_oof
+encoder4,gt_n_components,Multifocality (# components),selection_oof,187,5.0,-0.006467569171273446,3.133765274190648,0.074328794952289,selection_oof
+encoder4,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,0.11888704567341946,743.1500041778074,0.2863011392152456,selection_oof
+encoder4,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,0.032963755406027806,763.4507810215262,0.3266010783440963,selection_oof
+encoder4,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.22041817612050107,0.14769631720905257,0.41697009356850945,selection_oof
+encoder4,dice,Dice,selection_oof,187,5.0,0.28359466821428814,0.062046609118718135,0.5635985597833069,selection_oof
+bottleneck,centroid_x,Centroid X,selection_oof,187,5.0,0.8848951979510067,0.028090051253583638,0.9349681970498315,selection_oof
+bottleneck,centroid_y,Centroid Y,selection_oof,187,5.0,0.7772215398493277,0.03369327200048873,0.8915323039429786,selection_oof
+bottleneck,centroid_z,Centroid Z,selection_oof,187,5.0,0.9362242356714399,0.03320017468873008,0.9466415130349888,selection_oof
+bottleneck,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.18669601048240736,5090.961055000836,0.4591445222696936,selection_oof
+bottleneck,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.27924387353586944,0.5119877257491371,0.497332854362018,selection_oof
+bottleneck,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.08964169965036062,3939.628603358957,0.31856290172378954,selection_oof
+bottleneck,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.20025580726632053,1479.9562570500502,0.5327472451136165,selection_oof
+bottleneck,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,-0.0029181841511027873,1755.4265025745738,0.010977072299127349,selection_oof
+bottleneck,gt_edema_frac,Edema fraction,selection_oof,187,5.0,-0.04039835357546551,0.1787036934274529,-0.1381051827981458,selection_oof
+bottleneck,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,-0.025441571121129325,0.12193698139270763,0.13155861578457087,selection_oof
+bottleneck,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,-0.03038127456265749,0.120165967669275,-0.1893140922333394,selection_oof
+bottleneck,gt_compactness,Boundary complexity,selection_oof,187,5.0,-0.01053770037394397,1.0131896299700929,0.10639398955439168,selection_oof
+bottleneck,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.17960993048367713,0.06188881176654405,0.43954503246360005,selection_oof
+bottleneck,gt_elongation,Elongation,selection_oof,187,5.0,0.024685137400564217,1.3291656217617687,0.3415119339056519,selection_oof
+bottleneck,gt_n_components,Multifocality (# components),selection_oof,187,5.0,0.010261054913340173,3.077504197543955,0.046830257925334656,selection_oof
+bottleneck,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,0.05051488594955589,773.9048426011029,0.24711618264134944,selection_oof
+bottleneck,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,0.030755823709133767,789.7424868007395,0.14574318149678608,selection_oof
+bottleneck,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.11583051959833135,0.15811828469634814,0.3055728888365311,selection_oof
+bottleneck,dice,Dice,selection_oof,187,5.0,0.188474942885829,0.06540256970569391,0.467026231469689,selection_oof
+decoder4,centroid_x,Centroid X,selection_oof,187,5.0,0.8759886618286289,0.028666411324218363,0.9359811935006737,selection_oof
+decoder4,centroid_y,Centroid Y,selection_oof,187,5.0,0.7934681473192234,0.03653172891825565,0.9014200301696769,selection_oof
+decoder4,centroid_z,Centroid Z,selection_oof,187,5.0,0.9287110609039791,0.03244376704034326,0.9407103454097681,selection_oof
+decoder4,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.23627868560327991,4804.829790900735,0.5225706081331173,selection_oof
+decoder4,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.2985296527040835,0.5114306574396644,0.5212153577306481,selection_oof
+decoder4,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.1407721485760154,3810.0692719648227,0.4097629457671923,selection_oof
+decoder4,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.22379641951515272,1445.2596899022394,0.5484681249442257,selection_oof
+decoder4,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,-0.10410864156429889,1853.2629649116393,0.05452291532342614,selection_oof
+decoder4,gt_edema_frac,Edema fraction,selection_oof,187,5.0,-0.04801351235743767,0.17841081660247723,-0.12812936992354815,selection_oof
+decoder4,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,0.04132832888900628,0.11738685424683894,0.23395477811204135,selection_oof
+decoder4,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,-0.040831270838251,0.1206706942242675,-0.2322230720368837,selection_oof
+decoder4,gt_compactness,Boundary complexity,selection_oof,187,5.0,0.06521845929072312,0.9782740177953625,0.2628982709325073,selection_oof
+decoder4,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.17745050055998635,0.06007172869013866,0.43482322110849714,selection_oof
+decoder4,gt_elongation,Elongation,selection_oof,187,5.0,0.014225446048776402,1.3617639890706315,0.2725639454009594,selection_oof
+decoder4,gt_n_components,Multifocality (# components),selection_oof,187,5.0,0.011495685994647231,3.0658742807765695,0.11058923186458372,selection_oof
+decoder4,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,0.09067307921230816,753.8980546431108,0.25541746591319203,selection_oof
+decoder4,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,-0.0008626186632618715,798.5596819382938,0.09640787353860496,selection_oof
+decoder4,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.1771458921151141,0.1531219576698687,0.3573780305221319,selection_oof
+decoder4,dice,Dice,selection_oof,187,5.0,0.22010467048799065,0.06374898800410675,0.48003552828131946,selection_oof
+decoder3,centroid_x,Centroid X,selection_oof,187,5.0,0.7663449551982107,0.042274024593077886,0.8831347101765771,selection_oof
+decoder3,centroid_y,Centroid Y,selection_oof,187,5.0,0.8107979884035954,0.03752430882717168,0.9022531830477247,selection_oof
+decoder3,centroid_z,Centroid Z,selection_oof,187,5.0,0.9091865333599523,0.041184571752492814,0.9259833589641011,selection_oof
+decoder3,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.648576793183872,3369.714389413436,0.8376071434634823,selection_oof
+decoder3,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.7131522323051829,0.3273544395206925,0.8484977778757412,selection_oof
+decoder3,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.36892887080503334,3297.287711240391,0.618726687985139,selection_oof
+decoder3,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.5041407865028243,1071.554397011823,0.7597250750429049,selection_oof
+decoder3,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,0.17856084809025163,1534.2880448122075,0.5508144946272889,selection_oof
+decoder3,gt_edema_frac,Edema fraction,selection_oof,187,5.0,0.09800010969550987,0.15927584172968312,0.3539101295974808,selection_oof
+decoder3,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,0.09733569793173746,0.11247767820267719,0.37303936593283205,selection_oof
+decoder3,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,0.22310995946752632,0.09946353669552602,0.42030117864493444,selection_oof
+decoder3,gt_compactness,Boundary complexity,selection_oof,187,5.0,0.13657518950435799,0.9183036534850264,0.39222598629518574,selection_oof
+decoder3,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.5152844722417103,0.04709887683067839,0.7279902664254072,selection_oof
+decoder3,gt_elongation,Elongation,selection_oof,187,5.0,0.006810234676084992,1.4037562859731758,0.1759292223784129,selection_oof
+decoder3,gt_n_components,Multifocality (# components),selection_oof,187,5.0,0.05248741720150507,2.9963014132198804,0.20706175461032186,selection_oof
+decoder3,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,0.1294978308502337,735.8219052891043,0.2772116607040404,selection_oof
+decoder3,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,0.05158865003262669,754.8747764220212,0.4154224336429215,selection_oof
+decoder3,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.2022432654567241,0.14930388715079662,0.41442828680803917,selection_oof
+decoder3,dice,Dice,selection_oof,187,5.0,0.3266551584386199,0.06110084535935853,0.6188490745396557,selection_oof
+decoder2,centroid_x,Centroid X,selection_oof,187,5.0,0.4076582907919959,0.06753010625216124,0.6699007924128035,selection_oof
+decoder2,centroid_y,Centroid Y,selection_oof,187,5.0,0.5958104954647462,0.05757753658784985,0.793278988765282,selection_oof
+decoder2,centroid_z,Centroid Z,selection_oof,187,5.0,0.6196372333150191,0.08183965206169332,0.7818680975853248,selection_oof
+decoder2,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.7734028735523208,2595.9874874665775,0.8908280194580761,selection_oof
+decoder2,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.7264263079988402,0.3167656673663649,0.8698074158899206,selection_oof
+decoder2,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.7150484911106498,2090.6718893612133,0.8390609587693413,selection_oof
+decoder2,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.6440027591402016,885.8848805147059,0.8419484055011475,selection_oof
+decoder2,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,0.35706352683338716,1327.0838792770305,0.6491043910193246,selection_oof
+decoder2,gt_edema_frac,Edema fraction,selection_oof,187,5.0,0.5522937901452114,0.11159131860259311,0.7863183084427383,selection_oof
+decoder2,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,0.4891099911653992,0.08143298559899341,0.746209027894577,selection_oof
+decoder2,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,0.4000792083881388,0.08809960038394236,0.5749764755147643,selection_oof
+decoder2,gt_compactness,Boundary complexity,selection_oof,187,5.0,0.4124518394907234,0.7694793769283967,0.6559243776127784,selection_oof
+decoder2,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.522323111413713,0.04665262780188216,0.7538143353678902,selection_oof
+decoder2,gt_elongation,Elongation,selection_oof,187,5.0,0.018725097354973852,1.3638496245225262,0.3139775158831237,selection_oof
+decoder2,gt_n_components,Multifocality (# components),selection_oof,187,5.0,0.006749932287291371,3.0921357774479503,0.08519426868892872,selection_oof
+decoder2,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,0.012252540755622765,814.1454546107328,0.2980433213783681,selection_oof
+decoder2,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,0.24390908046271365,668.5805318087818,0.588738773473692,selection_oof
+decoder2,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.34226514425745747,0.14006680256710052,0.5137367687015929,selection_oof
+decoder2,dice,Dice,selection_oof,187,5.0,0.3555628978964721,0.0583535441867494,0.6193922755350347,selection_oof
+decoder1,centroid_x,Centroid X,selection_oof,187,5.0,0.1339212742399939,0.08295964327145174,0.37813762804678874,selection_oof
+decoder1,centroid_y,Centroid Y,selection_oof,187,5.0,0.2621451359793956,0.08124519436602741,0.5452893829897343,selection_oof
+decoder1,centroid_z,Centroid Z,selection_oof,187,5.0,0.033568754400397194,0.14566847249715728,0.35761527422474576,selection_oof
+decoder1,gt_wt_voxels,Whole-tumor volume,selection_oof,187,5.0,0.76582907192076,2467.9325231868315,0.892479644863929,selection_oof
+decoder1,log_wt_volume,log(WT volume),selection_oof,187,5.0,0.7395756047682146,0.31454402804988035,0.8689724274902954,selection_oof
+decoder1,gt_edema_voxels,Edema volume,selection_oof,187,5.0,0.7228841981387365,2057.81412673379,0.8418476191353612,selection_oof
+decoder1,gt_enhancing_voxels,Enhancing volume,selection_oof,187,5.0,0.6703658310470852,864.0624327634108,0.8338131506959071,selection_oof
+decoder1,gt_necrosis_voxels,Necrosis volume,selection_oof,187,5.0,0.4878560009034949,1214.042486670183,0.61327543991475,selection_oof
+decoder1,gt_edema_frac,Edema fraction,selection_oof,187,5.0,0.5541867812224825,0.10658948985872653,0.7696203832503239,selection_oof
+decoder1,gt_enhancing_frac,Enhancing fraction,selection_oof,187,5.0,0.5924312912717862,0.07237787293179149,0.8077656433568838,selection_oof
+decoder1,gt_necrosis_frac,Necrosis fraction,selection_oof,187,5.0,0.48281303897403904,0.07665727819731599,0.6309307468066003,selection_oof
+decoder1,gt_compactness,Boundary complexity,selection_oof,187,5.0,0.17755388042514086,0.8927333283134046,0.4734198539963811,selection_oof
+decoder1,boundary_to_volume_ratio,Boundary-to-volume ratio,selection_oof,187,5.0,0.5781148813702413,0.04261026848371665,0.782372760672248,selection_oof
+decoder1,gt_elongation,Elongation,selection_oof,187,5.0,0.004733758942929378,1.434826449263456,0.08305286299957058,selection_oof
+decoder1,gt_n_components,Multifocality (# components),selection_oof,187,5.0,-0.011962988060284063,3.1506782853029627,-0.032580363394260424,selection_oof
+decoder1,false_positive_voxels,False-positive voxels,selection_oof,187,5.0,0.24001532365245393,747.328899526341,0.41758381915358433,selection_oof
+decoder1,false_negative_voxels,False-negative voxels,selection_oof,187,5.0,0.09989152863257833,733.4636569915608,0.4780928733837247,selection_oof
+decoder1,boundary_error_fraction,Boundary error fraction,selection_oof,187,5.0,0.3417379797055192,0.14573417146407658,0.4898951718602424,selection_oof
+decoder1,dice,Dice,selection_oof,187,5.0,0.4630283140741057,0.0587126796479089,0.6705173989480987,selection_oof
+encoder1,centroid_x,Centroid X,locked_test,188,,-0.024847367270809162,0.09255659078284531,-0.06678261246471508,locked_test
+encoder1,centroid_y,Centroid Y,locked_test,188,,0.06809127177932639,0.1022946389469564,0.31804546447850573,locked_test
+encoder1,centroid_z,Centroid Z,locked_test,188,,0.005799686673598425,0.16077664984843804,0.14402924290283486,locked_test
+encoder1,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.5611134789856382,3626.8251667428526,0.7571796803994943,locked_test
+encoder1,log_wt_volume,log(WT volume),locked_test,188,,0.48577739882872983,0.43190221837910064,0.7375320961863687,locked_test
+encoder1,gt_edema_voxels,Edema volume,locked_test,188,,0.5121447096903426,2665.8141180809507,0.7253797815271515,locked_test
+encoder1,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.4210103847260037,1223.8281269479305,0.668693363422765,locked_test
+encoder1,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.11686645739605661,1407.4292492156333,0.31212790262949425,locked_test
+encoder1,gt_edema_frac,Edema fraction,locked_test,188,,0.14037208957457548,0.15177127183259712,0.45449669229393885,locked_test
+encoder1,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.2318872234946372,0.10264878063746999,0.5169958805538535,locked_test
+encoder1,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.10307882924984324,0.10311418124835785,0.19494513770630403,locked_test
+encoder1,gt_compactness,Boundary complexity,locked_test,188,,0.01721446610992161,0.9461782892217999,0.3717706295929074,locked_test
+encoder1,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.45111655398374506,0.04711554051838165,0.7067709095243513,locked_test
+encoder1,gt_elongation,Elongation,locked_test,188,,0.05311564590231588,1.2771736797277395,0.19527475722719773,locked_test
+encoder1,gt_n_components,Multifocality (# components),locked_test,188,,0.051018976941516136,3.142488904455875,0.12779148267433088,locked_test
+encoder1,false_positive_voxels,False-positive voxels,locked_test,188,,0.18582548595842963,744.7826778330701,0.31611431905080295,locked_test
+encoder1,false_negative_voxels,False-negative voxels,locked_test,188,,0.16902119260806125,726.5453043186918,0.40910937974680484,locked_test
+encoder1,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.1888160458102338,0.15054250807314748,0.46124852305726,locked_test
+encoder1,dice,Dice,locked_test,188,,0.22906609490316332,0.06611468073684719,0.6159304469692455,locked_test
+encoder2,centroid_x,Centroid X,locked_test,188,,0.034656654825572786,0.08816829248760688,0.20138087472255178,locked_test
+encoder2,centroid_y,Centroid Y,locked_test,188,,0.4846568120735463,0.07050022599373204,0.7246919399610261,locked_test
+encoder2,centroid_z,Centroid Z,locked_test,188,,0.25998439261736617,0.12218574941242585,0.5637295537170379,locked_test
+encoder2,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.614140959401805,3499.6719788896276,0.7960793326070973,locked_test
+encoder2,log_wt_volume,log(WT volume),locked_test,188,,0.595613403099241,0.38724451534018256,0.8180070046103757,locked_test
+encoder2,gt_edema_voxels,Edema volume,locked_test,188,,0.47077637503386305,2951.478658473238,0.6871338877187736,locked_test
+encoder2,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.6330985302343097,950.011903154089,0.8499952593928608,locked_test
+encoder2,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.27241731632080457,1253.9195991678441,0.5351863139678552,locked_test
+encoder2,gt_edema_frac,Edema fraction,locked_test,188,,0.3570071223207244,0.13262780522741943,0.645382846884724,locked_test
+encoder2,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.44979728741430636,0.08909486092892388,0.7262092894953236,locked_test
+encoder2,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.29736960876149166,0.08191196276893688,0.6127130987800496,locked_test
+encoder2,gt_compactness,Boundary complexity,locked_test,188,,0.2282789806109019,0.8611199962297774,0.4597648214669491,locked_test
+encoder2,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.5398908416864027,0.04251384131972078,0.7527266225639191,locked_test
+encoder2,gt_elongation,Elongation,locked_test,188,,0.06634744049488084,1.2889546555326412,0.18888148425069576,locked_test
+encoder2,gt_n_components,Multifocality (# components),locked_test,188,,0.05271366475347539,3.240928846470853,0.17932009688481704,locked_test
+encoder2,false_positive_voxels,False-positive voxels,locked_test,188,,0.21973831739688565,871.1637157683676,0.2618633847753647,locked_test
+encoder2,false_negative_voxels,False-negative voxels,locked_test,188,,0.16077737806754555,744.0962845822598,0.4045112551169713,locked_test
+encoder2,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.2834146507040588,0.13616651400276147,0.5206238236006607,locked_test
+encoder2,dice,Dice,locked_test,188,,0.3032877796766009,0.06011102117926784,0.6522709664136447,locked_test
+encoder3,centroid_x,Centroid X,locked_test,188,,0.5612949510490606,0.05567441825634748,0.7694376267592787,locked_test
+encoder3,centroid_y,Centroid Y,locked_test,188,,0.6737444189298869,0.05375513787728529,0.8468829182220922,locked_test
+encoder3,centroid_z,Centroid Z,locked_test,188,,0.7730564341934268,0.06317895796064982,0.8610528673106895,locked_test
+encoder3,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.6736524878497173,3118.6428923911235,0.8256988017575125,locked_test
+encoder3,log_wt_volume,log(WT volume),locked_test,188,,0.6956385857570297,0.31685953718860616,0.8431638227275494,locked_test
+encoder3,gt_edema_voxels,Edema volume,locked_test,188,,0.46276090839227724,2831.325971887467,0.7331989059188677,locked_test
+encoder3,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.5930126982212398,972.4849450943318,0.8399364270953134,locked_test
+encoder3,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.29690397893176235,1282.1062547399642,0.5585869668463015,locked_test
+encoder3,gt_edema_frac,Edema fraction,locked_test,188,,0.3204431977279848,0.13622795749287075,0.6178141146852035,locked_test
+encoder3,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.24407946325425123,0.1052488857430225,0.5728842519255196,locked_test
+encoder3,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.2713631894878441,0.08830438103931224,0.48394134416955475,locked_test
+encoder3,gt_compactness,Boundary complexity,locked_test,188,,0.17683568499518698,0.8799316265451776,0.42154244031590704,locked_test
+encoder3,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.45084532364738794,0.046389030848785186,0.7027164186112871,locked_test
+encoder3,gt_elongation,Elongation,locked_test,188,,-0.03105541105084142,1.3508422530910904,0.03023440194904525,locked_test
+encoder3,gt_n_components,Multifocality (# components),locked_test,188,,0.08193930853332165,3.0628645546892854,0.30532139315290097,locked_test
+encoder3,false_positive_voxels,False-positive voxels,locked_test,188,,0.12408706393307534,768.2497185240401,0.4835934674611527,locked_test
+encoder3,false_negative_voxels,False-negative voxels,locked_test,188,,0.13810412196823885,776.6642309959899,0.38798979238573894,locked_test
+encoder3,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.4118558789298842,0.12265339924006653,0.5610998410032774,locked_test
+encoder3,dice,Dice,locked_test,188,,0.4576243165453787,0.055464018806540276,0.6641454776623738,locked_test
+encoder4,centroid_x,Centroid X,locked_test,188,,0.7837075367912422,0.036502480521495274,0.8996129722037105,locked_test
+encoder4,centroid_y,Centroid Y,locked_test,188,,0.8238417432162893,0.03865439294438845,0.9112003279712916,locked_test
+encoder4,centroid_z,Centroid Z,locked_test,188,,0.9021792876925889,0.03771369423668057,0.9194014162725049,locked_test
+encoder4,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.5904163110701013,3744.5957680560173,0.7802045035572421,locked_test
+encoder4,log_wt_volume,log(WT volume),locked_test,188,,0.5713936506446616,0.40521766466916864,0.7785059510292116,locked_test
+encoder4,gt_edema_voxels,Edema volume,locked_test,188,,0.21847363634787853,3674.933319741107,0.4799392819121833,locked_test
+encoder4,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.47050890909620124,1156.8776491855053,0.7400389207737238,locked_test
+encoder4,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.20462653500994643,1355.577257196954,0.5260225482269247,locked_test
+encoder4,gt_edema_frac,Edema fraction,locked_test,188,,0.07078875486845548,0.16228915861285315,0.28409790737700624,locked_test
+encoder4,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.16755028585025677,0.11169345899442384,0.39691670306514915,locked_test
+encoder4,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.08047931651117246,0.10171683476634237,0.2175826636793235,locked_test
+encoder4,gt_compactness,Boundary complexity,locked_test,188,,0.014458232434430673,0.9726728922133323,0.11622572949231272,locked_test
+encoder4,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.39230847798534363,0.0493795218413241,0.6186358489237087,locked_test
+encoder4,gt_elongation,Elongation,locked_test,188,,0.005142297672040663,1.3135558722864913,0.09505388228792484,locked_test
+encoder4,gt_n_components,Multifocality (# components),locked_test,188,,0.0345077885593863,3.196192580334684,0.11634171013613778,locked_test
+encoder4,false_positive_voxels,False-positive voxels,locked_test,188,,0.08595505148360782,697.6900316603641,0.5259346249104857,locked_test
+encoder4,false_negative_voxels,False-negative voxels,locked_test,188,,0.1208771886988379,778.0943463913937,0.3137010027064089,locked_test
+encoder4,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.3724284394089987,0.12769899124690393,0.5459255109398374,locked_test
+encoder4,dice,Dice,locked_test,188,,0.3248801072937426,0.062032986834154674,0.5466609596772299,locked_test
+bottleneck,centroid_x,Centroid X,locked_test,188,,0.8187120458862783,0.03063257614738749,0.9275447122756258,locked_test
+bottleneck,centroid_y,Centroid Y,locked_test,188,,0.8675572330029331,0.03273641766737959,0.9411204842994579,locked_test
+bottleneck,centroid_z,Centroid Z,locked_test,188,,0.9259807654417351,0.033811789984108255,0.9383590960562174,locked_test
+bottleneck,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.2541218289452375,5195.215139835439,0.4994141754638682,locked_test
+bottleneck,log_wt_volume,log(WT volume),locked_test,188,,0.2785059823183994,0.5252467527130052,0.5444253659541458,locked_test
+bottleneck,gt_edema_voxels,Edema volume,locked_test,188,,0.09512627005937035,3977.1659312146776,0.3175183964791305,locked_test
+bottleneck,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.32993071599425383,1329.7892897585605,0.6083286302695057,locked_test
+bottleneck,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.05678007383868233,1500.5375392183344,0.13689932771208965,locked_test
+bottleneck,gt_edema_frac,Edema fraction,locked_test,188,,0.010198155809080012,0.1684889699483343,0.08732235640871434,locked_test
+bottleneck,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.07276049113536365,0.11823041085565222,0.2969461417293653,locked_test
+bottleneck,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.022884619275469475,0.10613284702156138,0.03721840801404007,locked_test
+bottleneck,gt_compactness,Boundary complexity,locked_test,188,,-0.005509399942047244,0.9881353160964285,0.0915971804582568,locked_test
+bottleneck,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.17944633490739959,0.06043215484879644,0.4169714307386397,locked_test
+bottleneck,gt_elongation,Elongation,locked_test,188,,0.060959596911784764,1.2830395733050346,0.31705215935503794,locked_test
+bottleneck,gt_n_components,Multifocality (# components),locked_test,188,,0.03558904265264351,3.2728551873501313,0.09147017733970955,locked_test
+bottleneck,false_positive_voxels,False-positive voxels,locked_test,188,,0.028981226805684934,765.6454870345744,0.3658186063992991,locked_test
+bottleneck,false_negative_voxels,False-negative voxels,locked_test,188,,0.05271502697010677,803.3084431100399,0.11864913383498091,locked_test
+bottleneck,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.2765942800580943,0.13268559307723193,0.5315115228136396,locked_test
+bottleneck,dice,Dice,locked_test,188,,0.25661657122073,0.06751800228838624,0.48752860267253256,locked_test
+decoder4,centroid_x,Centroid X,locked_test,188,,0.7982600727250003,0.0310265652520589,0.9193996102631896,locked_test
+decoder4,centroid_y,Centroid Y,locked_test,188,,0.8134661321866601,0.039745644083073385,0.8960894480293728,locked_test
+decoder4,centroid_z,Centroid Z,locked_test,188,,0.9305863753232952,0.032378729200534945,0.9385487270343339,locked_test
+decoder4,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.31520914182783577,4924.489016269115,0.5612013940592772,locked_test
+decoder4,log_wt_volume,log(WT volume),locked_test,188,,0.318818564507246,0.5130159669904796,0.6206128063276003,locked_test
+decoder4,gt_edema_voxels,Edema volume,locked_test,188,,0.09235017225442677,4078.4908940741357,0.33626840212292236,locked_test
+decoder4,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.30793216162736836,1338.3374750664893,0.6279017687962444,locked_test
+decoder4,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.07175415857403689,1478.7539640386053,0.34876129330529915,locked_test
+decoder4,gt_edema_frac,Edema fraction,locked_test,188,,0.017861394919103546,0.1676257272094999,0.12563142600689534,locked_test
+decoder4,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.11100288593092744,0.11641775433114056,0.3491339064459807,locked_test
+decoder4,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.035296169089283125,0.10421735399515085,0.029357716977495552,locked_test
+decoder4,gt_compactness,Boundary complexity,locked_test,188,,-0.08219847845965256,1.0194045000627825,0.1767866398654884,locked_test
+decoder4,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.13558232523516434,0.05986838107868009,0.4114703263639433,locked_test
+decoder4,gt_elongation,Elongation,locked_test,188,,-0.0001743168758061575,1.3308496520777977,0.21612513477344514,locked_test
+decoder4,gt_n_components,Multifocality (# components),locked_test,188,,0.006264987433244551,3.2704990797854485,0.05985344477839635,locked_test
+decoder4,false_positive_voxels,False-positive voxels,locked_test,188,,0.026464329698618894,752.5417139580909,0.3691145867932095,locked_test
+decoder4,false_negative_voxels,False-negative voxels,locked_test,188,,0.07732293885378949,784.9796905517578,0.2553873549804147,locked_test
+decoder4,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.2891672303494325,0.13663335047408953,0.4445643453464699,locked_test
+decoder4,dice,Dice,locked_test,188,,0.26367830483752963,0.06573959762717162,0.45908034393641395,locked_test
+decoder3,centroid_x,Centroid X,locked_test,188,,0.686697629278952,0.04493976099428928,0.8603774198267313,locked_test
+decoder3,centroid_y,Centroid Y,locked_test,188,,0.8120775689652927,0.04013368402367749,0.9107993939032736,locked_test
+decoder3,centroid_z,Centroid Z,locked_test,188,,0.8942654604778308,0.04370564884774379,0.9238008549648097,locked_test
+decoder3,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.6359993525872849,3495.888173204787,0.8188982706099324,locked_test
+decoder3,log_wt_volume,log(WT volume),locked_test,188,,0.6144280503835643,0.3757265620350723,0.8178643298100413,locked_test
+decoder3,gt_edema_voxels,Edema volume,locked_test,188,,0.42543456273048297,3148.322465612533,0.6422734788198169,locked_test
+decoder3,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.4808444528203727,1110.032380449011,0.7821028822830205,locked_test
+decoder3,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.29448305908120753,1270.853801321476,0.5271269318986983,locked_test
+decoder3,gt_edema_frac,Edema fraction,locked_test,188,,0.13487969766391883,0.1520634511611131,0.4257847561977724,locked_test
+decoder3,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.2521572684324702,0.10169542402936087,0.5170536743132296,locked_test
+decoder3,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.11027296573947032,0.09933700587986374,0.35781450214332633,locked_test
+decoder3,gt_compactness,Boundary complexity,locked_test,188,,0.13026031759698342,0.9169554756109386,0.42474449483210425,locked_test
+decoder3,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.5014405173907425,0.04346451909339742,0.7228516164686375,locked_test
+decoder3,gt_elongation,Elongation,locked_test,188,,-0.015900817108935428,1.3267822302410137,0.08512805509050815,locked_test
+decoder3,gt_n_components,Multifocality (# components),locked_test,188,,0.03418009126759303,3.121125550980264,0.20125219925565116,locked_test
+decoder3,false_positive_voxels,False-positive voxels,locked_test,188,,0.01057989300617701,977.8792422680144,0.3276132270880784,locked_test
+decoder3,false_negative_voxels,False-negative voxels,locked_test,188,,0.17415651390512898,731.3128356933594,0.46233005360943275,locked_test
+decoder3,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.318062110606124,0.1334481713200595,0.510428739905336,locked_test
+decoder3,dice,Dice,locked_test,188,,0.24151096344634293,0.06923470550215897,0.5563899318592684,locked_test
+decoder2,centroid_x,Centroid X,locked_test,188,,0.3753051920967886,0.07008396378723253,0.6092861386979034,locked_test
+decoder2,centroid_y,Centroid Y,locked_test,188,,0.5981260575045227,0.06310138423604633,0.7661362417307348,locked_test
+decoder2,centroid_z,Centroid Z,locked_test,188,,0.5869934965143488,0.08276037737467858,0.7402796063622097,locked_test
+decoder2,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.8234354888165266,2356.2666898686834,0.9106634513667232,locked_test
+decoder2,log_wt_volume,log(WT volume),locked_test,188,,0.7815048395002541,0.2727057022666472,0.9104349910851752,locked_test
+decoder2,gt_edema_voxels,Edema volume,locked_test,188,,0.7410525855954351,2054.934520964927,0.8646909508922058,locked_test
+decoder2,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.6878275422636138,845.9254176363032,0.8804065436449934,locked_test
+decoder2,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.48310474450057084,1030.1052145450674,0.7145488778054391,locked_test
+decoder2,gt_edema_frac,Edema fraction,locked_test,188,,0.5820823283174575,0.10279095080476636,0.7786554983050601,locked_test
+decoder2,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.5275397618412558,0.08403529166764187,0.7294692187351316,locked_test
+decoder2,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.5260263430081965,0.06736894096435493,0.686291153501323,locked_test
+decoder2,gt_compactness,Boundary complexity,locked_test,188,,0.30194485264129356,0.816380102583096,0.5595233580214807,locked_test
+decoder2,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.6160493856580733,0.0401113526934286,0.7839651656923244,locked_test
+decoder2,gt_elongation,Elongation,locked_test,188,,0.06294096052485176,1.3212685743685242,0.17219757019506707,locked_test
+decoder2,gt_n_components,Multifocality (# components),locked_test,188,,0.04012090924263234,3.181475931025566,0.19648733523031917,locked_test
+decoder2,false_positive_voxels,False-positive voxels,locked_test,188,,0.17020452890839877,888.9836623820853,0.4650646395974136,locked_test
+decoder2,false_negative_voxels,False-negative voxels,locked_test,188,,0.3184265669026546,648.1975003506275,0.5804987863636848,locked_test
+decoder2,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.3536948302622047,0.12635842745017706,0.5483383775150286,locked_test
+decoder2,dice,Dice,locked_test,188,,0.41209900745404204,0.05805717739814261,0.6370137997171789,locked_test
+decoder1,centroid_x,Centroid X,locked_test,188,,0.24975241243942659,0.07745458859273367,0.5174686251031683,locked_test
+decoder1,centroid_y,Centroid Y,locked_test,188,,0.22413417326799956,0.09061499198100514,0.4952095602909119,locked_test
+decoder1,centroid_z,Centroid Z,locked_test,188,,0.1594952425776207,0.13998832001559575,0.4062003911816177,locked_test
+decoder1,gt_wt_voxels,Whole-tumor volume,locked_test,188,,0.824274770698068,2241.8814801155254,0.9298116737786788,locked_test
+decoder1,log_wt_volume,log(WT volume),locked_test,188,,0.7725555574457184,0.2887133437480131,0.9018311588219772,locked_test
+decoder1,gt_edema_voxels,Edema volume,locked_test,188,,0.7648090789209055,1879.2234795752993,0.8848017857839843,locked_test
+decoder1,gt_enhancing_voxels,Enhancing volume,locked_test,188,,0.760106884362439,788.9434807960023,0.8824853148047882,locked_test
+decoder1,gt_necrosis_voxels,Necrosis volume,locked_test,188,,0.30363508211291224,1143.2482163449552,0.6572545726487031,locked_test
+decoder1,gt_edema_frac,Edema fraction,locked_test,188,,0.593191104669366,0.10123519161292528,0.7847038235023216,locked_test
+decoder1,gt_enhancing_frac,Enhancing fraction,locked_test,188,,0.6582492934784492,0.06943685258220535,0.7947183730707448,locked_test
+decoder1,gt_necrosis_frac,Necrosis fraction,locked_test,188,,0.5198171405730134,0.06422287779645083,0.678817853212013,locked_test
+decoder1,gt_compactness,Boundary complexity,locked_test,188,,0.3207257938914485,0.8180228970127777,0.5313478066919869,locked_test
+decoder1,boundary_to_volume_ratio,Boundary-to-volume ratio,locked_test,188,,0.5888217707143626,0.04253868258064899,0.7719245015865791,locked_test
+decoder1,gt_elongation,Elongation,locked_test,188,,0.0568336296084051,1.3079149738294942,0.1487230611135492,locked_test
+decoder1,gt_n_components,Multifocality (# components),locked_test,188,,0.027245025307547133,3.2345615980472973,0.18491790774580177,locked_test
+decoder1,false_positive_voxels,False-positive voxels,locked_test,188,,0.24425453010780251,742.2902461924451,0.5554350039484746,locked_test
+decoder1,false_negative_voxels,False-negative voxels,locked_test,188,,0.3396249178230625,642.9863453317196,0.6209734804246432,locked_test
+decoder1,boundary_error_fraction,Boundary error fraction,locked_test,188,,0.4162963377059442,0.12746048502873716,0.5626331671427514,locked_test
+decoder1,dice,Dice,locked_test,188,,0.5478709409209086,0.05614148636840154,0.6822922592634733,locked_test
