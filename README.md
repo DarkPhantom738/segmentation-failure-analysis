@@ -27,7 +27,7 @@ The answer is mixed—and that asymmetry is the point. Edema fraction at decoder
 | Probe/random ratio | 2.36× | 0.86× |
 | Interpretation | Weak semantic steering | Decodable, not a downstream control axis |
 
-*Probe edit effects for the comparison rows come from the 30-case matched-random screens (|α| = 1). Full-cohort editing at |α| = 1 yields mean |Δedema| ≈ 2.05 pp (375 cases; `editing_summary.csv`).*
+*Probe edit effects in the table come from the 30-case matched-random screens (`edema_probe_screen_summary.csv`, `volume_probe_screen_summary.csv`). Full-cohort editing means are in `editing_summary.csv` (375 cases): edema |Δ| = 2.03 pp at α = +1 and 2.05 pp at α = −1; 4.08 pp at α = +2 and 4.17 pp at α = −2.*
 
 ---
 
@@ -56,7 +56,7 @@ Tissue fractions are compositional (edema, enhancing, necrosis sum within tumor)
 | Stage | Method | Scale |
 |---|---|---|
 | Linear probing | Fold-safe Ridge on global-pooled activations | 375 val cases, all encoder/decoder layers |
-| Layer ablation | Replace layer activations with channel means | 375 val cases (partial log committed) |
+| Layer ablation | Replace layer activations with channel means | **254 / 375** cases in committed `rho_log.csv` (incomplete) |
 | Representation editing | A′ = A + αΔ, Δ from probe adjoint lift | 375 val cases, multiple properties |
 | Matched-random controls | Unit random directions, same \|α\| and RMS budget | 30 stratified cases per screen |
 
@@ -84,15 +84,15 @@ Probe targets are derived from ground-truth anatomy or segmentation quality, whe
 
 ### Editing (375 cases)
 
-- Decoder1 tissue-fraction edits were **monotonic but small** (e.g., edema Δ ≈ 2.05 pp at |α| = 1; ≈ 4.17 pp at |α| = 2).
+- Decoder1 tissue-fraction edits were **monotonic but small** (edema |Δ| = 2.03 pp at α = +1 and 2.05 pp at α = −1; 4.08 pp at α = +2 and 4.17 pp at α = −2; `editing_summary.csv`).
 - Edits caused **substantial off-target changes** in other tissue properties and whole-tumor voxel count.
 - **Dice changes were negligible**; no evidence of segmentation repair.
 
 ### Matched-random screens (small; not significance tests)
 
-**Edema (decoder1):** 30 cases, 3 random directions, |α| = 1. Probe mean |Δedema| = 0.0208 vs random 0.0088 (ratio 2.36). Weak target-related steering beyond a generic same-sized perturbation, but not selective control.
+**Edema (decoder1):** 30 cases, 3 random directions, |α| = 1. Probe mean |Δedema| = 0.02079 vs random 0.00880 (ratio 2.36; `edema_probe_screen_summary.csv`). Weak target-related steering beyond a generic same-sized perturbation, but not selective control.
 
-**Whole-tumor voxel count (decoder2):** 30 cases, 5 random directions, |α| = 1. Probe mean absolute change in whole-tumor voxel count = 3.82 voxels vs random 4.45 (ratio 0.86; 47th percentile). +α/−α flipped analytical Ridge predictions in 100% of cases but predicted whole-tumor voxel count in only 57%—representation moves along the readout axis without probe-specific downstream volume control.
+**Whole-tumor voxel count (decoder2):** 30 cases, 5 random directions, |α| = 1. Probe mean absolute change = 3.82 voxels vs random 4.45 (ratio 0.86; 47.3rd percentile; `volume_probe_screen_summary.csv`). +α/−α flipped analytical Ridge predictions in 100% of cases (30/30) but predicted whole-tumor voxel count in 56.7% of cases (17/30).
 
 ---
 
@@ -131,7 +131,7 @@ This is a mechanistic readout-versus-control analysis, not a clinical correction
 - On this U-Net, late decoder layers encode anatomical properties with substantial linear recoverability.
 - Probe-aligned additive edits can weakly steer some tissue-composition outputs.
 - A highly predictive whole-tumor voxel-count direction does not provide probe-specific downstream volume control in this setting.
-- Recoverability, functional dependence on intact layer activations (ablation), and selective controllability are distinct and can diverge.
+- Recoverability, functional dependence on intact layer activations (ablation; partial log only), and selective controllability are distinct and can diverge.
 
 ## What this study does not establish
 
@@ -148,14 +148,20 @@ This is a mechanistic readout-versus-control analysis, not a clinical correction
 - Tissue fractions are compositional and partially coupled.
 - Random-control screens are small exploratory checks, not powered hypothesis tests.
 - Whole-layer ablation is destructive and not property-specific.
-- Layer ablation log in the repository covers 279/375 cases at last commit (`rho_log.csv`).
+- Layer ablation log in the repository covers **254 / 375** validation cases (`outputs_10hour/layer_interventions/rho_log.csv` on `main`). No committed `ablation_summary.csv`, report, or ablation figures.
 - Checkpoints, embeddings, and raw predictions are not stored in git.
 
 ---
 
 ## Manuscript status
 
-Core experiments are complete. Manuscript construction (figures, Results, Methods) is beginning.
+Probing (375 cases), representation editing (375 cases), and matched-random probe screens (30 cases each) are complete and committed. Whole-layer ablation is **incomplete** in the repository (254-case partial log only). Manuscript construction is beginning.
+
+---
+
+## Data provenance
+
+Every numerical result stated in this README is copied from a committed file under `outputs_10hour/` (cited inline). This repository does **not** include model checkpoints, layer embeddings, or raw predictions required to re-derive those numbers from scratch. To reproduce, run the commands below locally and compare against the committed CSVs.
 
 ---
 

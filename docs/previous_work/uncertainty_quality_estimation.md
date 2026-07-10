@@ -1,6 +1,8 @@
 # Archived: Uncertainty and Latent Geometry for Segmentation Quality Estimation
 
-This document preserves the **earlier research direction** that preceded the mechanistic probing-and-editing study now described in the main [README](../../README.md). It is kept for context and reproducibility of the 533-case uncertainty baseline experiments.
+This document preserves the **earlier research direction** that preceded the mechanistic probing-and-editing study now described in the main [README](../../README.md). It is kept for context.
+
+**Data provenance:** The numeric results below were produced by local runs under `outputs_5epoch_533/`, which is **not** tracked in git. Only the figures in [`docs/figures/`](../figures/) are committed. To verify the statistics, reproduce the pipeline locally (commands at the end) or inspect your local `outputs_5epoch_533/baselines/baseline_results.csv`.
 
 ---
 
