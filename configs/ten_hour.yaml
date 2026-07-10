@@ -4,7 +4,7 @@
 seed: 42
 
 data:
-  root: "/Users/aniketmangalampalli/Downloads/archive/BraTS2021_Training_Data"
+  root: "/path/to/BraTS2021_Training_Data"
   # Use the entire available training archive
   max_cases: null
   # Large holdout so embedding / uncertainty tests are statistically useful
