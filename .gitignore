@@ -34,6 +34,8 @@ outputs_10hour/representation_editing/examples/
 outputs_10hour/representation_editing/interim*/
 outputs_10hour/layer_interventions/predictions/
 outputs_10hour/layer_interventions/interim*/
+outputs_10hour/layer_interventions/ablation_results.csv
+outputs_10hour/layer_interventions/matched_baseline/ablation_results.csv
 outputs_10hour/semantic_directions/*
 !outputs_10hour/semantic_directions/directions/
 !outputs_10hour/semantic_directions/directions/**

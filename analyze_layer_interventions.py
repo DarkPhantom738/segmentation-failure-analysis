@@ -9,7 +9,11 @@ from pathlib import Path
 import torch
 import yaml
 
-from src.analysis.layer_interventions import backfill_rho_only, run_layer_ablations
+from src.analysis.layer_interventions import (
+    backfill_rho_only,
+    recompute_ablation_with_matched_baseline,
+    run_layer_ablations,
+)
 from src.utils.io import ensure_dir
 
 
@@ -27,6 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--overlap", type=float, default=None)
     parser.add_argument("--max-cases", type=int, default=None)
     parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=None,
+        help="Override config data.root (for local BraTS path).",
+    )
+    parser.add_argument(
         "--save-predictions",
         action="store_true",
         help="Cache ablated prediction masks for resume.",
@@ -36,6 +46,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only compute rho for cached predictions (no mask overwrite, no restart).",
     )
+    parser.add_argument(
+        "--recompute-matched-baseline",
+        action="store_true",
+        help=(
+            "Rescore cached ablated predictions against matched sliding-window "
+            "baseline (no TTA). Writes to output-dir/matched_baseline/."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -43,6 +61,8 @@ def main() -> None:
     args = parse_args()
     with args.config.open("r") as handle:
         config = yaml.safe_load(handle)
+    if args.data_root is not None:
+        config["data"]["root"] = str(args.data_root)
 
     output_dir = args.output_dir
     if output_dir is None:
@@ -71,6 +91,22 @@ def main() -> None:
         strength = output_dir / "intervention_strength_summary.csv"
         if strength.exists():
             print(f"  strength summary: {strength}")
+        return
+
+    if args.recompute_matched_baseline:
+        results = recompute_ablation_with_matched_baseline(
+            config=config,
+            checkpoint_path=args.checkpoint,
+            failure_table_path=args.failure_table,
+            output_dir=output_dir,
+            device=device,
+            overlap=args.overlap,
+            max_cases=args.max_cases,
+        )
+        matched_dir = output_dir / "matched_baseline"
+        print(f"Wrote matched-baseline ablation rescore to {matched_dir}")
+        if not results["comparison"].empty:
+            print(results["comparison"].to_string(index=False))
         return
 
     results = run_layer_ablations(

@@ -18,7 +18,10 @@ from tqdm import tqdm
 
 from src.data.brats_dataset import BraTSCase
 from src.models.unet3d import LAYER_NAMES, build_model
-from src.training.intervention_inference import intervention_prediction
+from src.training.intervention_inference import (
+    baseline_prediction,
+    intervention_prediction,
+)
 from src.training.metrics import whole_tumor_dice, whole_tumor_mask
 from src.utils.io import ensure_dir
 
@@ -289,6 +292,270 @@ def backfill_rho_only(
     return rho_df
 
 
+def _build_ablation_artifacts(
+    results_df: pd.DataFrame,
+    rho_df: pd.DataFrame,
+    output_dir: Path,
+    n_cases: int,
+    baseline_description: str,
+) -> dict[str, pd.DataFrame | str]:
+    """Aggregate per-case ablation rows into summary tables, figures, and report."""
+    figures_dir = ensure_dir(output_dir / "figures")
+
+    ablated_df = results_df[results_df["intervention"] != "baseline"].copy()
+    summary_df = (
+        ablated_df.groupby(["layer", "intervention", "metric", "metric_label"], as_index=False)
+        .agg(
+            mean_baseline=("baseline_value", "mean"),
+            mean_ablated=("value", "mean"),
+            mean_delta=("delta", "mean"),
+            mean_degradation=("degradation", "mean"),
+            mean_abs_delta=("abs_delta", "mean"),
+            std_degradation=("degradation", "std"),
+            n_cases=("case_id", "nunique"),
+        )
+        .sort_values(["layer", "intervention", "mean_degradation"], ascending=[True, True, False])
+    )
+    summary_df.to_csv(output_dir / "ablation_summary.csv", index=False)
+
+    ranking_rows: list[dict[str, Any]] = []
+    for (layer, intervention), group in summary_df.groupby(["layer", "intervention"]):
+        ranked = group.sort_values("mean_degradation", ascending=False)
+        for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
+            ranking_rows.append(
+                {
+                    "layer": layer,
+                    "intervention": intervention,
+                    "metric": row["metric"],
+                    "metric_label": row["metric_label"],
+                    "rank": rank,
+                    "mean_degradation": row["mean_degradation"],
+                    "mean_delta": row["mean_delta"],
+                    "mean_baseline": row["mean_baseline"],
+                    "mean_ablated": row["mean_ablated"],
+                }
+            )
+    ranking_df = pd.DataFrame(ranking_rows)
+    ranking_df.to_csv(output_dir / "degradation_ranking.csv", index=False)
+
+    strength_df = build_intervention_strength_summary(rho_df, summary_df)
+    strength_df.to_csv(output_dir / "intervention_strength_summary.csv", index=False)
+
+    _plot_degradation_heatmap(summary_df, figures_dir / "heatmap_mean_degradation.png")
+    _plot_layer_metric_bars(
+        summary_df, intervention="zero", output_path=figures_dir / "bar_degradation_zero.png"
+    )
+
+    report = _generate_ablation_report(
+        summary_df,
+        ranking_df,
+        strength_df,
+        n_cases=n_cases,
+        baseline_description=baseline_description,
+    )
+    (output_dir / "layer_interventions_report.md").write_text(report)
+
+    return {
+        "summary": summary_df,
+        "ranking": ranking_df,
+        "strength": strength_df,
+        "report": report,
+    }
+
+
+def compare_dice_rankings(
+    old_summary: pd.DataFrame,
+    new_summary: pd.DataFrame,
+    intervention: str = "mean",
+) -> pd.DataFrame:
+    """Compare per-layer mean Dice degradation between two ablation summaries."""
+    rows: list[dict[str, Any]] = []
+    for layer in LAYER_NAMES:
+        old_row = old_summary[
+            (old_summary["layer"] == layer)
+            & (old_summary["intervention"] == intervention)
+            & (old_summary["metric"] == "dice")
+        ]
+        new_row = new_summary[
+            (new_summary["layer"] == layer)
+            & (new_summary["intervention"] == intervention)
+            & (new_summary["metric"] == "dice")
+        ]
+        if old_row.empty or new_row.empty:
+            continue
+        old_deg = float(old_row["mean_degradation"].iloc[0])
+        new_deg = float(new_row["mean_degradation"].iloc[0])
+        rows.append(
+            {
+                "layer": layer,
+                "intervention": intervention,
+                "tta_baseline_dice_degradation": old_deg,
+                "matched_baseline_dice_degradation": new_deg,
+                "delta_degradation": new_deg - old_deg,
+            }
+        )
+    comp = pd.DataFrame(rows)
+    if comp.empty:
+        return comp
+    comp["tta_rank"] = comp["tta_baseline_dice_degradation"].rank(ascending=False, method="min")
+    comp["matched_rank"] = comp["matched_baseline_dice_degradation"].rank(
+        ascending=False, method="min"
+    )
+    return comp.sort_values("matched_rank")
+
+
+def recompute_ablation_with_matched_baseline(
+    config: dict,
+    checkpoint_path: Path,
+    failure_table_path: Path,
+    output_dir: Path,
+    device: torch.device,
+    overlap: float | None = None,
+    max_cases: int | None = None,
+    layers: tuple[str, ...] = LAYER_NAMES,
+    interventions: tuple[str, ...] = INTERVENTIONS,
+) -> dict[str, Any]:
+    """
+    Re-score cached ablated predictions against a matched sliding-window baseline.
+
+    Baseline: same overlap and patch grid as ablation inference, no TTA, no ablation.
+    Ablated masks are read from ``output_dir/predictions/{layer}/{intervention}/``.
+    """
+    output_dir = ensure_dir(output_dir)
+    matched_dir = ensure_dir(output_dir / "matched_baseline")
+    pred_dir = output_dir / "predictions"
+    matched_baseline_dir = ensure_dir(pred_dir / "matched_baseline")
+
+    failure_df = pd.read_csv(failure_table_path)
+    if max_cases is not None and max_cases > 0:
+        failure_df = failure_df.head(max_cases)
+
+    model = build_model(config)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+    model.eval()
+
+    patch_size = config["data"]["patch_size"]
+    num_classes = config["model"]["num_classes"]
+    data_cfg = config["data"]
+    if overlap is None:
+        overlap = float(config.get("uncertainty", {}).get("overlap", 0.25))
+
+    rho_df = load_rho_log(output_dir)
+    result_rows: list[dict[str, Any]] = []
+
+    for record in tqdm(failure_df.to_dict(orient="records"), desc="Matched-baseline rescore"):
+        case_id = str(record["case_id"])
+        gt = np.load(record["path_ground_truth"]).astype(np.int16)
+
+        baseline_path = matched_baseline_dir / f"{case_id}.npy"
+        if baseline_path.exists():
+            baseline_pred = np.load(baseline_path).astype(np.int16)
+        else:
+            loader = BraTSCase(
+                case_id=case_id,
+                data_root=Path(data_cfg["root"]),
+                modalities=data_cfg["modalities"],
+                target_spacing=data_cfg["target_spacing"],
+                percentile_clip=data_cfg["percentile_clip"],
+            )
+            image, _ = loader.load()
+            baseline_pred = baseline_prediction(
+                model=model,
+                image=torch.from_numpy(image),
+                patch_size=patch_size,
+                num_classes=num_classes,
+                overlap=overlap,
+                device=device,
+            )
+            np.save(baseline_path, baseline_pred)
+
+        baseline_metrics = compute_prediction_quantities(baseline_pred, gt)
+        for metric, value in baseline_metrics.items():
+            result_rows.append(
+                {
+                    "case_id": case_id,
+                    "layer": "none",
+                    "intervention": "baseline",
+                    "metric": metric,
+                    "metric_label": METRIC_SPECS[metric],
+                    "value": value,
+                    "baseline_value": value,
+                    "delta": 0.0,
+                    "degradation": 0.0,
+                    "abs_delta": 0.0,
+                }
+            )
+
+        for layer_name in layers:
+            for intervention in interventions:
+                pred_path = pred_dir / layer_name / intervention / f"{case_id}.npy"
+                if not pred_path.exists():
+                    continue
+                ablated_pred = np.load(pred_path).astype(np.int16)
+                rho_row = rho_df[
+                    (rho_df["case_id"] == case_id)
+                    & (rho_df["layer"] == layer_name)
+                    & (rho_df["intervention"] == intervention)
+                ]
+                rho_mean = float(rho_row["rho_mean"].iloc[0]) if not rho_row.empty else float("nan")
+
+                ablated_metrics = compute_prediction_quantities(ablated_pred, gt)
+                for metric, ablated_value in ablated_metrics.items():
+                    baseline_value = baseline_metrics[metric]
+                    delta = float(ablated_value - baseline_value)
+                    degradation = _degradation_delta(metric, baseline_value, ablated_value)
+                    result_rows.append(
+                        {
+                            "case_id": case_id,
+                            "layer": layer_name,
+                            "intervention": intervention,
+                            "metric": metric,
+                            "metric_label": METRIC_SPECS[metric],
+                            "value": ablated_value,
+                            "baseline_value": baseline_value,
+                            "delta": delta,
+                            "degradation": degradation,
+                            "abs_delta": abs(delta),
+                            "rho_mean": rho_mean,
+                        }
+                    )
+
+    results_df = pd.DataFrame(result_rows)
+    results_df.to_csv(matched_dir / "ablation_results.csv", index=False)
+
+    artifacts = _build_ablation_artifacts(
+        results_df=results_df,
+        rho_df=rho_df,
+        output_dir=matched_dir,
+        n_cases=failure_df["case_id"].nunique(),
+        baseline_description=(
+            "matched sliding-window inference (same overlap/patch grid as ablations; "
+            "no TTA, no ablation)"
+        ),
+    )
+
+    old_summary_path = output_dir / "ablation_summary.csv"
+    comparison_df = pd.DataFrame()
+    comparison_md = ""
+    if old_summary_path.exists():
+        old_summary = pd.read_csv(old_summary_path)
+        comparison_df = compare_dice_rankings(old_summary, artifacts["summary"])
+        comparison_df.to_csv(matched_dir / "baseline_comparison.csv", index=False)
+        comparison_md = _generate_baseline_comparison_report(
+            comparison_df, old_summary, artifacts["summary"]
+        )
+        (matched_dir / "baseline_comparison.md").write_text(comparison_md)
+
+    return {
+        "results": results_df,
+        "comparison": comparison_df,
+        "comparison_report": comparison_md,
+        **artifacts,
+    }
+
+
 def run_layer_ablations(
     config: dict,
     checkpoint_path: Path,
@@ -308,7 +575,6 @@ def run_layer_ablations(
     Ablated metrics require re-inference with the intervention forward pass.
     """
     output_dir = ensure_dir(output_dir)
-    figures_dir = ensure_dir(output_dir / "figures")
     pred_dir = ensure_dir(output_dir / "predictions")
 
     failure_df = pd.read_csv(failure_table_path)
@@ -429,60 +695,18 @@ def run_layer_ablations(
     results_df = pd.DataFrame(result_rows)
     results_df.to_csv(output_dir / "ablation_results.csv", index=False)
 
-    ablated_df = results_df[results_df["intervention"] != "baseline"].copy()
-    summary_df = (
-        ablated_df.groupby(["layer", "intervention", "metric", "metric_label"], as_index=False)
-        .agg(
-            mean_baseline=("baseline_value", "mean"),
-            mean_ablated=("value", "mean"),
-            mean_delta=("delta", "mean"),
-            mean_degradation=("degradation", "mean"),
-            mean_abs_delta=("abs_delta", "mean"),
-            std_degradation=("degradation", "std"),
-            n_cases=("case_id", "nunique"),
-        )
-        .sort_values(["layer", "intervention", "mean_degradation"], ascending=[True, True, False])
+    artifacts = _build_ablation_artifacts(
+        results_df=results_df,
+        rho_df=rho_df,
+        output_dir=output_dir,
+        n_cases=failure_df["case_id"].nunique(),
+        baseline_description="existing validation predictions (TTA; `failure_metrics.csv`)",
     )
-    summary_df.to_csv(output_dir / "ablation_summary.csv", index=False)
-
-    ranking_rows: list[dict[str, Any]] = []
-    for (layer, intervention), group in summary_df.groupby(["layer", "intervention"]):
-        ranked = group.sort_values("mean_degradation", ascending=False)
-        for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
-            ranking_rows.append(
-                {
-                    "layer": layer,
-                    "intervention": intervention,
-                    "metric": row["metric"],
-                    "metric_label": row["metric_label"],
-                    "rank": rank,
-                    "mean_degradation": row["mean_degradation"],
-                    "mean_delta": row["mean_delta"],
-                    "mean_baseline": row["mean_baseline"],
-                    "mean_ablated": row["mean_ablated"],
-                }
-            )
-    ranking_df = pd.DataFrame(ranking_rows)
-    ranking_df.to_csv(output_dir / "degradation_ranking.csv", index=False)
-
-    strength_df = build_intervention_strength_summary(rho_df, summary_df)
-    strength_df.to_csv(output_dir / "intervention_strength_summary.csv", index=False)
-
-    _plot_degradation_heatmap(summary_df, figures_dir / "heatmap_mean_degradation.png")
-    _plot_layer_metric_bars(summary_df, intervention="zero", output_path=figures_dir / "bar_degradation_zero.png")
-
-    report = _generate_ablation_report(
-        summary_df, ranking_df, strength_df, n_cases=failure_df["case_id"].nunique()
-    )
-    (output_dir / "layer_interventions_report.md").write_text(report)
 
     return {
         "results": results_df,
-        "summary": summary_df,
-        "ranking": ranking_df,
         "rho_log": rho_df,
-        "strength": strength_df,
-        "report": report,
+        **artifacts,
     }
 
 
@@ -542,12 +766,13 @@ def _generate_ablation_report(
     ranking_df: pd.DataFrame,
     strength_df: pd.DataFrame,
     n_cases: int,
+    baseline_description: str = "existing validation predictions (no ablation)",
 ) -> str:
     report = f"""# Layer Intervention Report (Part 1 — Ablation)
 
 **Cases:** {n_cases}  
 **Interventions:** zero, mean, noise (per-layer activation replacement)  
-**Baseline:** existing validation predictions (no ablation)
+**Baseline:** {baseline_description}
 
 ## Ablation semantics
 
@@ -557,10 +782,19 @@ def _generate_ablation_report(
 | bottleneck | Replace bottleneck map, then decode |
 | decoder4–decoder1 | Replace decoder block output, continue downstream decoding |
 
-**Interpretation:** mean ablation is the primary read (removes case-specific spatial detail while preserving scale). Zero and noise are sanity checks. Compare layers using `intervention_strength_summary.csv` (degradation per unit ρ) — raw degradation alone is not comparable across layers.
+**Interpretation:** mean ablation is the primary read (removes case-specific spatial detail while preserving scale). Zero and noise are sanity checks. Compare layers using `intervention_strength_summary.csv` (degradation per unit ρ) — raw degradation alone is not comparable across layers. Results measure **functional dependence on intact spatial activations**, not necessity of any single probe direction.
 
 Positive `mean_degradation` means the metric got worse after ablation.
-
+"""
+    if "matched" in baseline_description.lower():
+        report += """
+**Primary baseline:** matched sliding-window inference. Scoring against TTA validation predictions is a robustness analysis (`baseline_comparison.md` when available).
+"""
+    elif "TTA" in baseline_description or "failure_metrics" in baseline_description:
+        report += """
+**Note:** Prefer `matched_baseline/` for manuscript tables when available. TTA-baseline scoring is a robustness analysis.
+"""
+    report += """
 ## Perturbation strength (ρ = ||A - A'|| / ||A||)
 
 | Layer | zero ρ | mean ρ | noise ρ | Dice deg/ρ (mean) |
@@ -636,3 +870,64 @@ Positive `mean_degradation` means the metric got worse after ablation.
 - `figures/heatmap_mean_degradation.png`
 """
     return report
+
+
+def _generate_baseline_comparison_report(
+    comparison_df: pd.DataFrame,
+    tta_summary: pd.DataFrame,
+    matched_summary: pd.DataFrame,
+) -> str:
+    """Summarize whether layer rankings are stable after switching to matched baseline."""
+    lines = [
+        "# Ablation baseline comparison",
+        "",
+        "Compares mean Dice degradation (mean ablation) when ablated outputs are scored against:",
+        "1. TTA validation predictions from `failure_metrics.csv`",
+        "2. Matched sliding-window inference (same path/overlap as ablations, no TTA)",
+        "",
+        "## Per-layer Dice degradation (mean ablation)",
+        "",
+        "| Layer | TTA baseline deg. | Matched baseline deg. | Δ deg. | TTA rank | Matched rank |",
+        "|-------|------------------:|----------------------:|-------:|---------:|-------------:|",
+    ]
+    for _, row in comparison_df.iterrows():
+        lines.append(
+            f"| {row['layer']} | {row['tta_baseline_dice_degradation']:.3f} | "
+            f"{row['matched_baseline_dice_degradation']:.3f} | {row['delta_degradation']:+.3f} | "
+            f"{int(row['tta_rank'])} | {int(row['matched_rank'])} |"
+        )
+
+    tta_top = comparison_df.sort_values("tta_rank").head(3)["layer"].tolist()
+    matched_top = comparison_df.sort_values("matched_rank").head(3)["layer"].tolist()
+    rank_corr = float(
+        comparison_df[["tta_rank", "matched_rank"]].corr(method="spearman").iloc[0, 1]
+    )
+    lines.extend(
+        [
+            "",
+            "## Ranking stability",
+            "",
+            f"- Top-3 layers (TTA baseline): {', '.join(tta_top)}",
+            f"- Top-3 layers (matched baseline): {', '.join(matched_top)}",
+            f"- Spearman correlation of layer ranks: {rank_corr:.3f}",
+        ]
+    )
+
+    d1_tta = tta_summary[
+        (tta_summary["layer"] == "decoder1")
+        & (tta_summary["intervention"] == "mean")
+        & (tta_summary["metric"] == "dice")
+    ]
+    d1_matched = matched_summary[
+        (matched_summary["layer"] == "decoder1")
+        & (matched_summary["intervention"] == "mean")
+        & (matched_summary["metric"] == "dice")
+    ]
+    if not d1_tta.empty and not d1_matched.empty:
+        lines.append(
+            f"- Reference baseline Dice (cohort mean): "
+            f"TTA = {d1_tta['mean_baseline'].iloc[0]:.3f}, "
+            f"matched sliding-window = {d1_matched['mean_baseline'].iloc[0]:.3f}"
+        )
+
+    return "\n".join(lines)
