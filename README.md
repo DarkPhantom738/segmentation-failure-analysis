@@ -1,278 +1,195 @@
-# Decodable Is Not Necessarily Controllable  
+# Decodable Is Not Controllable
 ## Probing and Editing Anatomical Representations in a 3D U-Net
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![Dataset: BraTS](https://img.shields.io/badge/dataset-BraTS%202021-green.svg)](https://www.synapse.org/#!Synapse:syn27046444)
 
-### Project summary
+**Thesis:** Late U-Net decoder representations contain linearly accessible anatomical information, but linear recoverability does not guarantee selective causal control. Probe-aligned editing weakly steers edema composition beyond matched random perturbations, whereas a highly predictive tumor-volume direction changes its analytical readout without producing probe-specific downstream volume control.
 
-This project investigates what anatomical and segmentation-related information is represented inside a trained 3D U-Net for brain-tumor segmentation, whether that information is required for prediction, and whether it can be causally manipulated through representation editing.
+---
 
-The central finding is that anatomical information can be highly linearly decodable without providing an effective causal control direction.
+## Thirty-second overview
 
-In particular, tumor volume is strongly recoverable from decoder2 activations with an out-of-fold Ridge-probe R² of 0.822. However, editing activations along that probe direction changes the probe prediction in the expected direction while producing only negligible, non-specific changes in the final segmentation volume.
+This repository documents a mechanistic case study of a trained 3D U-Net on BraTS 2021 (375 validation cases). We ask whether properties that are linearly decodable from internal activations can also be selectively manipulated by editing those activations along probe-derived directions.
 
-By contrast, decoder1 edema directions permit weak but measurable semantic steering, although the resulting changes are small and affect other tissue properties.
+The answer is mixed—and that asymmetry is the point. Edema fraction at decoder1 is weakly steerable beyond random controls. Tumor volume at decoder2 is strongly decodable (R² = 0.822) yet not steerable in a probe-specific way: matched random perturbations change segmentation volume as much as the probe direction does.
+
+---
+
+## Central comparison
+
+| Result | Edema at decoder1 | Tumor volume at decoder2 |
+|---|---:|---:|
+| OOF Ridge probe R² | 0.596 | 0.822 |
+| Probe edit effect | 2.08 percentage points | 3.82 voxels |
+| Matched-random effect | 0.88 percentage points | 4.45 voxels |
+| Probe/random ratio | 2.36× | 0.86× |
+| Interpretation | Weak semantic steering | Decodable, not a downstream control axis |
+
+*Probe edit effects for the comparison rows come from the 30-case matched-random screens (|α| = 1). Full-cohort editing at |α| = 1 yields mean |Δedema| ≈ 2.05 pp (375 cases; `editing_summary.csv`).*
 
 ---
 
 ## Research question
 
-**Does the presence of linearly decodable anatomical information in a segmentation network imply that the same representation can be selectively controlled?**
+**Does linearly decodable anatomical information in a segmentation network imply that the same representation can be selectively controlled?**
 
-The project separates three forms of evidence:
+We separate three forms of evidence often conflated in representation analysis:
 
-1. **Recoverability:** Can a property be decoded from internal activations?
-2. **Functional dependence:** Does disrupting the layer damage segmentation?
-3. **Controllability:** Can a targeted intervention selectively change the corresponding output property?
+1. **Recoverability** — Can a property be read out from activations?
+2. **Functional dependence** — Does disrupting a layer damage segmentation?
+3. **Controllability** — Can a targeted intervention change the corresponding output property?
 
-These forms of evidence are often treated as interchangeable in representation-analysis studies. This project tests where they agree and where they diverge.
+---
+
+## Why decodability ≠ controllability
+
+A Ridge probe identifies a direction correlated with a property in representation space. Editing along that direction tests whether the network *uses* that axis for downstream control. These need not coincide: correlations can reflect encoding without providing an intervention handle the decoder exploits.
+
+Tissue fractions are compositional (edema, enhancing, necrosis sum within tumor), so off-target coupling is expected even when on-target movement is real. Whole-layer mean ablation tests whether intact activations are needed for segmentation; it does **not** establish that any single probe direction is causally necessary.
+
+---
+
+## Study design
+
+| Stage | Method | Scale |
+|---|---|---|
+| Linear probing | Fold-safe Ridge on global-pooled activations | 375 val cases, all encoder/decoder layers |
+| Layer ablation | Replace layer activations with channel means | 375 val cases (partial log committed) |
+| Representation editing | A′ = A + αΔ, Δ from probe adjoint lift | 375 val cases, multiple properties |
+| Matched-random controls | Unit random directions, same \|α\| and RMS budget | 30 stratified cases per screen |
+
+**Model:** 3D U-Net, 10-hour BraTS training run, **epoch 5** checkpoint. **Intervention:** spatially constant per-channel perturbation broadcast across the activation map.
 
 ---
 
 ## Main findings
 
-The analysis uses 375 validation cases and a trained 3D U-Net checkpoint.
+### Probing (best layer per target, 5-fold OOF R² on 375 cases)
 
-| Property | Layer | Probe performance | Editing result |
-|---|---|---:|---|
-| Tumor volume | decoder2 | R² = 0.822 | No probe-specific downstream control |
-| Enhancing fraction | decoder1 | R² = 0.647 | Weak, monotonic steering |
-| Edema fraction | decoder1 | R² = 0.596 | Weak, monotonic steering |
-| Dice | decoder1 | R² = 0.565 | Negligible editing effect |
-| Necrosis fraction | decoder1 | R² = 0.525 | Weak, coupled steering |
-| Boundary complexity | decoder2 | R² = 0.430 | No meaningful editing effect |
+| Property | Layer | R² |
+|---|---|---:|
+| Tumor volume | decoder2 | 0.822 |
+| Enhancing fraction | decoder1 | 0.647 |
+| Edema fraction | decoder1 | 0.596 |
+| Dice | decoder1 | 0.565 |
+| Necrosis fraction | decoder1 | 0.525 |
+| Boundary complexity | decoder2 | 0.430 |
+| Boundary error | decoder1 | 0.415 |
 
-### Edema editing
+*Source: `outputs_10hour/layer_analysis/layer_recoverability.csv`*
 
-At decoder1, editing along the learned edema probe direction produced:
+### Editing (375 cases)
 
-- approximately 2.0 percentage points of edema-fraction change at |α| = 1;
-- approximately 4.1 percentage points at |α| = 2;
-- a monotonic dose response across tested intervention strengths;
-- a mean absolute effect 2.36 times larger than RMS-matched random directions in a 30-case screening experiment.
+- Decoder1 tissue-fraction edits were **monotonic but small** (e.g., edema Δ ≈ 2.05 pp at |α| = 1; ≈ 4.17 pp at |α| = 2).
+- Edits caused **substantial off-target changes** in other tissue properties and volume.
+- **Dice changes were negligible**; no evidence of segmentation repair.
 
-However, the edit also changed enhancing fraction, necrosis fraction, volume, and other outputs. The intervention is therefore weakly semantic but not independently selective.
+### Matched-random screens (small; not significance tests)
 
-### Volume probe–edit gap
+**Edema (decoder1):** 30 cases, 3 random directions, |α| = 1. Probe mean |Δedema| = 0.0208 vs random 0.0088 (ratio 2.36). Weak target-related steering beyond a generic same-sized perturbation, but not selective control.
 
-Tumor volume provides the strongest example of a gap between recoverability and controllability.
-
-- Decoder2 volume probe: R² = 0.822
-- Mean downstream volume change from the probe edit: 3.82 voxels
-- Mean change from RMS-matched random directions: 4.45 voxels
-- Probe/random effect ratio: 0.86
-- Probe direction percentile relative to random controls: 47th percentile
-- Analytical probe prediction moved in opposite expected directions for +α and −α in 100% of cases
-- Actual segmentation volume moved in opposite directions in only 57% of cases
-
-The intervention therefore moves the activation along the Ridge probe’s readout axis, but that axis does not function as a specific downstream control direction for tumor volume.
+**Volume (decoder2):** 30 cases, 5 random directions, |α| = 1. Probe mean |Δvolume| = 3.82 voxels vs random 4.45 (ratio 0.86; 47th percentile). +α/−α flipped analytical Ridge predictions in 100% of cases but actual volume in only 57%—representation moves along the readout axis without probe-specific downstream volume control.
 
 ---
 
-## Current interpretation
+## Interpretation
 
-The results support the following conclusion:
+The strongest volume probe in this study is among the weakest editors. Predictive probe directions may reflect naturally occurring representation correlations rather than axes the downstream network treats as control handles. Edema at decoder1 shows the opposite partial pattern: modest semantic steering beyond random, coupled across tissue properties.
 
-> Late U-Net decoder representations contain linearly accessible anatomical information, but linear recoverability does not guarantee selective causal control. Probe-aligned editing can weakly steer some tissue-composition properties, while highly predictive volume directions fail to produce probe-specific changes in the final segmentation.
-
-This is not currently presented as a clinical correction method. Dice improvements are negligible, and the interventions are not sufficiently selective for automatic segmentation repair.
-
-The intended contribution is a mechanistic analysis of the distinction between representation readout and representation control.
+This is a mechanistic readout-versus-control analysis, not a clinical correction method.
 
 ---
 
-## Methods overview
+## Key figures
 
-### Model
+**Layer recoverability (locked holdout R²)**
 
-- 3D U-Net for multi-class brain-tumor segmentation
-- Primary analysis checkpoint: 10-hour training run, epoch 5
-- Analysis performed on 375 validation cases
+![Layer recoverability heatmap](outputs_10hour/layer_holdout_recoverability/figures/heatmap_locked_r2.png)
 
-### Stage 1: Linear probing
+**Editing dose–response**
 
-Internal activations were extracted from the bottleneck and decoder layers.
+![Editing dose response](outputs_10hour/representation_editing/figures/dose_response.png)
 
-Global pooled activation features were used to train fold-safe Ridge probes for:
+**Edema probe vs random (30-case screen)**
 
-- tumor volume;
-- enhancing-tumor fraction;
-- edema fraction;
-- necrosis fraction;
-- Dice;
-- boundary complexity;
-- boundary error.
+![Edema probe vs random](outputs_10hour/edema_probe_screen/figures/abs_edema_delta_probe_vs_random.png)
 
-Performance was evaluated using out-of-fold predictions.
+**Volume: analytical probe change vs actual segmentation change**
 
-### Stage 2: Layer ablation
-
-Layer activations were replaced with mean activations to measure how strongly segmentation depended on intact layer representations.
-
-These experiments establish functional dependence on intact decoder activations, but they are not interpreted as property-specific causal ablations.
-
-### Stage 3: Representation editing
-
-Activations were modified using:
-
-A' = A + αΔ
-
-where Δ is a direction derived from a trained linear probe.
-
-The analysis measured:
-
-- target-property change;
-- off-target changes;
-- Dice change;
-- dose-response behavior;
-- effects in easy and difficult cases;
-- comparison with RMS-matched random directions.
+![Volume analytical vs actual](outputs_10hour/volume_probe_screen/figures/analytical_vs_actual_volume.png)
 
 ---
 
-## Why this may be scientifically useful
+## What this study establishes
 
-The project provides evidence that three commonly conflated concepts are distinct:
+- On this U-Net, late decoder layers encode anatomical properties with substantial linear recoverability.
+- Probe-aligned additive edits can weakly steer some tissue-composition outputs.
+- A highly predictive volume direction does not provide probe-specific downstream volume control in this setting.
+- Recoverability, layer necessity (ablation), and selective controllability are distinct and can diverge.
 
-- a property being statistically recoverable from an activation;
-- the network depending on that activation for segmentation;
-- the same property being selectively steerable through intervention.
+## What this study does not establish
 
-The strongest probe in the study produced one of the weakest edits. This suggests that predictive probe directions may reflect naturally occurring correlations in representation space without corresponding to directions that the downstream network uses as causal control axes.
-
-This distinction may be relevant to:
-
-- mechanistic interpretability in medical imaging;
-- validation of representation-editing methods;
-- causal analysis of segmentation networks;
-- failure diagnosis and uncertainty analysis;
-- the design of more appropriate intervention directions.
+- Universal claims across architectures, datasets, or training regimes.
+- Clinical utility, deployment readiness, or automatic segmentation repair.
+- That tumor volume is uncontrollable in general—only that this probe direction at decoder2 fails the matched-random screen.
+- Formal significance of the 30-case random-direction comparisons.
 
 ---
 
-## Current limitations
+## Limitations
 
-The current study has several important limitations:
-
-- The primary findings come from one trained U-Net checkpoint.
-- The random-direction control experiments use a limited subset of cases and directions.
-- Whole-layer mean ablation is highly destructive and does not isolate individual semantic properties.
-- Tissue fractions are mathematically coupled because they are compositional variables.
-- The editing intervention uses a globally broadcast additive channel direction.
-- The analysis does not demonstrate clinically useful segmentation correction.
-- The current results should be interpreted as a mechanistic case study rather than a universal claim across segmentation architectures.
-
-These limitations will be stated explicitly in the manuscript.
+- Single checkpoint and additive, globally broadcast interventions.
+- Tissue fractions are compositional and partially coupled.
+- Random-control screens are small exploratory checks, not powered hypothesis tests.
+- Whole-layer ablation is destructive and not property-specific.
+- Layer ablation log in the repository covers 279/375 cases at last commit (`rho_log.csv`).
+- Checkpoints, embeddings, and raw predictions are not stored in git.
 
 ---
 
-## Current project status
+## Manuscript status
 
-Completed:
-
-- layer-wise linear probing;
-- whole-layer ablation analysis;
-- representation editing across multiple anatomical properties;
-- dose-response analysis;
-- tissue-coupling analysis;
-- easy-versus-failure-case analysis;
-- RMS-matched random-direction screen for decoder1 edema;
-- RMS-matched random-direction screen for decoder2 volume.
-
-Current stage:
-
-- locking the experimental results;
-- constructing manuscript figures;
-- writing the Results and Methods sections;
-- refining the interpretation and statistical reporting.
+Core experiments are complete. Manuscript construction (figures, Results, Methods) is beginning.
 
 ---
 
-## Mentorship I am seeking
+## Mentorship sought
 
-I am looking for academic mentorship in one or more of the following areas:
+I am seeking **scientific mentorship** (not implementation help) on:
 
-- positioning the contribution for a medical-imaging or machine-learning audience;
-- evaluating whether the central claim is sufficiently novel and well supported;
-- strengthening the causal and statistical interpretation;
-- identifying essential analyses versus unnecessary expansion;
-- selecting an appropriate venue;
-- reviewing the manuscript structure and major figures;
-- avoiding overclaiming while preserving the significance of the result.
-
-The immediate goal is not to request extensive implementation support. I am primarily seeking scientific guidance on framing, rigor, and publication strategy.
+- causal interpretation and statistical rigor;
+- essential versus optional controls;
+- manuscript framing and related literature;
+- publication venue;
+- main-paper versus supplementary analyses.
 
 ---
 
-## Questions on which feedback would be especially valuable
+## Reproduction
 
-1. Is the distinction between decodability and controllability a sufficiently clear central contribution?
-2. Are the current random-direction controls adequate for the scope of the claim?
-3. Should the paper be framed as a focused mechanistic case study of one U-Net, or is replication across additional training seeds essential before submission?
-4. Are there any major causal-interpretation issues that would prevent publication in its current form?
-5. Which analyses belong in the main paper versus the supplement?
-6. Which journals or conferences would be the best fit?
-
----
-
-## Repository structure
-
-```text
-configs/ten_hour.yaml              # Primary experiment config (375 val cases)
-src/analysis/                      # Probing, editing, probe-screen modules
-src/training/                      # Inference + cached downstream editing
-learn_semantic_directions.py       # Fit Ridge probes and lift edit directions
-analyze_representation_editing.py  # Full editing experiment
-analyze_edema_probe_screen.py    # decoder1 edema vs random (30 cases)
-analyze_volume_probe_screen.py   # decoder2 volume vs random (30 cases)
-analyze_layer_interventions.py   # Whole-layer ablation
-
-outputs_10hour/                    # Curated results tracked in git (see below)
-├── failure_tables/failure_metrics.csv
-├── layer_holdout_recoverability/  # Fold-safe probing R² tables + figures
-├── layer_analysis/                # Layer recoverability summary
-├── semantic_directions/directions/
-├── representation_editing/        # Editing CSVs, figures, report
-├── edema_probe_screen/
-└── volume_probe_screen/
-```
-
-Large artifacts (checkpoints, raw predictions, embeddings, caches) are **not** in git. Train locally or download the checkpoint separately.
-
----
-
-## Reproducing the analysis
-
-### Setup
+**Prerequisites:** BraTS 2021 data, Python environment (`requirements.txt`), trained checkpoint at `outputs_10hour/checkpoints/checkpoint_latest.pt` (epoch 5; not in git).
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+# Set data.root in configs/ten_hour.yaml
 ```
 
-Download [BraTS 2021 training data](https://www.synapse.org/#!Synapse:syn27046444) and set `data.root` in `configs/ten_hour.yaml`.
-
-Train the model (or place a compatible checkpoint at `outputs_10hour/checkpoints/checkpoint_latest.pt`):
+**Inspect committed results** (no GPU required):
 
 ```bash
-python train.py --config configs/ten_hour.yaml
+# Tables and reports under outputs_10hour/
 ```
 
-### Probing → editing → probe screens
-
-After training and exporting layer embeddings (`export_layer_embeddings.py`), run:
+**Re-run analysis** (requires local checkpoint + layer embeddings from `export_layer_embeddings.py`):
 
 ```bash
-bash scripts/run_representation_analysis.sh
-```
+python analyze_layer_holdout_recoverability.py \
+  --layer-index outputs_10hour/layer_embeddings/layer_index.csv \
+  --failure-table outputs_10hour/failure_tables/failure_metrics.csv
 
-Or step by step:
-
-```bash
-# 1. Learn semantic directions (requires layer embeddings + failure table)
 python learn_semantic_directions.py \
   --config configs/ten_hour.yaml \
   --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
@@ -280,7 +197,6 @@ python learn_semantic_directions.py \
   --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
   --output-dir outputs_10hour/semantic_directions
 
-# 2. Representation editing (long-running on 375 cases)
 python analyze_representation_editing.py \
   --config configs/ten_hour.yaml \
   --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
@@ -288,13 +204,11 @@ python analyze_representation_editing.py \
   --directions-dir outputs_10hour/semantic_directions \
   --output-dir outputs_10hour/representation_editing
 
-# 3. Edema probe screen (30 stratified cases)
 python analyze_edema_probe_screen.py \
   --config configs/ten_hour.yaml \
   --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
   --failure-table outputs_10hour/failure_tables/failure_metrics.csv
 
-# 4. Volume probe screen (30 stratified cases, 5 random directions)
 python analyze_volume_probe_screen.py \
   --config configs/ten_hour.yaml \
   --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
@@ -302,18 +216,43 @@ python analyze_volume_probe_screen.py \
   --n-random 5
 ```
 
-Precomputed result tables and figures for the primary 10-hour run are included under `outputs_10hour/` so findings can be inspected without re-running inference.
+Precomputed summaries: `outputs_10hour/representation_editing/`, `edema_probe_screen/`, `volume_probe_screen/`.
 
 ---
 
-## Citation
+## Repository structure
 
-If you use this code in academic work, please cite the repository and acknowledge the BraTS challenge data.
-
-BraTS data: Menze et al., CVPR 2015; Bakas et al., 2017, 2018, 2021.
+```text
+configs/ten_hour.yaml
+analyze_layer_holdout_recoverability.py   # Probing
+learn_semantic_directions.py              # Probe → edit directions
+analyze_representation_editing.py         # Full editing cohort
+analyze_edema_probe_screen.py           # Edema vs random (30 cases)
+analyze_volume_probe_screen.py            # Volume vs random (30 cases)
+analyze_layer_interventions.py            # Whole-layer ablation
+export_layer_embeddings.py                # Activation export (local)
+outputs_10hour/                           # Curated CSVs, figures, directions
+docs/previous_work/                       # Archived uncertainty study
+```
 
 ---
 
-## License
+## Data governance and license
 
-Code is released for research purposes. BraTS data use is subject to the [Synapse terms](https://www.synapse.org/#!Synapse:syn27046444).
+Code is released for research. BraTS 2021 use is subject to [Synapse terms](https://www.synapse.org/#!Synapse:syn27046444). No patient identifiers are included in committed artifacts. BraTS: Menze et al., CVPR 2015; Bakas et al., 2017–2021.
+
+---
+
+## Contact
+
+**[YOUR NAME]** — [YOUR INSTITUTION]  
+Email: [YOUR EMAIL]  
+GitHub: [DarkPhantom738/segmentation-failure-analysis](https://github.com/DarkPhantom738/segmentation-failure-analysis)
+
+---
+
+## Project origins
+
+This repository began as an investigation of whether bottleneck embeddings complement TTA uncertainty for segmentation-quality estimation without ground truth. Those experiments motivated the present mechanistic question: *what do internal representations encode, and can they be manipulated?*
+
+The earlier uncertainty-and-geometry analysis is archived at [`docs/previous_work/uncertainty_quality_estimation.md`](docs/previous_work/uncertainty_quality_estimation.md).
