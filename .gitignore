@@ -6,8 +6,8 @@ __pycache__/
 .mypy_cache/
 .DS_Store
 
-# Data
-data/
+# Data (repo-root BraTS/cache only; do not ignore src/data/)
+/data/
 
 # Experiment outputs (default: ignore)
 outputs/
