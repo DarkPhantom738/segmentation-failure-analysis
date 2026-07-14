@@ -12,11 +12,11 @@ In one sentence: this project helps a brain-tumor segmentation model flag which 
 
 ## Research questions
 
-**RQ1 — Recoverability, dependence, and control.** How closely are anatomical recoverability, functional dependence, and controllability related within a three-dimensional medical segmentation network?
+**RQ1.** How closely are anatomical recoverability, functional dependence, and controllability related within a three-dimensional medical segmentation network?
 
 We test this with three complementary probes on the same frozen U-Net: fold-safe linear probing (can anatomy be read out?), spatial mean ablation (does the layer need intact spatial structure?), and probe-aligned editing with matched random controls (does a decoded direction selectively move the output?).
 
-**RQ2 — Reliability without control.** Even when decoded anatomical directions are unsuitable for controlling the output, can the underlying representation still contribute to reliability assessment?
+**RQ2.** Even when decoded anatomical directions are unsuitable for controlling the output, can the underlying representation still contribute to reliability assessment?
 
 We hypothesized that disagreement between an anatomical property estimated from the hidden representation and the same property measured from the final mask could expose failures that conventional confidence does not capture. For example, the representation may indicate one tumor composition while the final segmentation expresses another, even when the output probabilities appear confident.
 
@@ -59,7 +59,6 @@ Bootstrap vs confidence: ΔAUPRC **+0.115** [0.056, 0.185], P(better) **100%**; 
 
 **Where it helps less:** edema-specific labels (`edema_lt_0.70`: ΔAUPRC +0.006 vs confidence; `lowest20_edema`: proposed 0.779 vs confidence 0.794). Morphology-augmented confidence is often stronger there.
 
-These are research quality-control metrics—not a claim of clinical benefit or deployment readiness.
 
 Canonical numbers: `outputs_confidence_consistency_triage_20260712_030902/aggregate_metrics.csv`, `bootstrap_comparisons.csv`. Full baseline tables, ablations, and figures: `outputs_method_validation/validation_summary.md`.
 
@@ -84,7 +83,7 @@ We use this baseline because it is the standard cheap signal available **at infe
 
 The proposed method **augments** confidence with representation–output gaps; it does not replace confidence. Consistency-only underperforms confidence-only on the primary endpoint.
 
-**Feature ablation (primary endpoint):** removing enhancing-fraction gaps drops AUPRC from 0.886 to **0.773** (below confidence 0.805). Other anatomy families (edema, volume, necrosis, compactness) can be dropped with little or no loss—enhancing-composition disagreement carries most of the gain.
+**Feature ablation (primary endpoint):** removing enhancing-fraction gaps drops AUPRC from 0.886 to **0.773** (below confidence 0.805). Other anatomy families (edema, volume, necrosis, compactness) can be dropped with little or no loss—enhancing-composition disagreement carries most of the gain. (Will have to test further once I run on several seeds and test models till convergence rather than the current 5 epoch 10 hour model I am using currently.)
 
 ---
 
@@ -139,7 +138,7 @@ Train/val provenance: `docs/manuscript/environment_and_split.md`.
 
 ## Mechanistic companion findings
 
-Decode ≠ control is still in the paper, but it is no longer the headline endpoint.
+Decode ≠ control, although this is already a known concept, it is still a novel finding that wasn't found in UNET/medical imaging in general.
 
 ### Full-cohort probe R² (375 cases, 5-fold OOF)
 
@@ -364,7 +363,6 @@ python scripts/run_method_validation.py \
 - Enhancing-fraction discrepancy features carry much of the consistency signal.
 - No supported improvement in risk–coverage AURC.
 - Representation editing did not provide automatic correction.
-- Exploratory edit screens use 30 cases; triage claims rest on the 375-case nested evaluation.
 
 
 
