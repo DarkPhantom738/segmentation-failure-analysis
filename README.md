@@ -10,27 +10,81 @@ In one sentence: this project helps a brain-tumor segmentation model flag which 
 
 ---
 
+## Research questions
+
+**RQ1 — Recoverability, dependence, and control.** How closely are anatomical recoverability, functional dependence, and controllability related within a three-dimensional medical segmentation network?
+
+We test this with three complementary probes on the same frozen U-Net: fold-safe linear probing (can anatomy be read out?), spatial mean ablation (does the layer need intact spatial structure?), and probe-aligned editing with matched random controls (does a decoded direction selectively move the output?).
+
+**RQ2 — Reliability without control.** Even when decoded anatomical directions are unsuitable for controlling the output, can the underlying representation still contribute to reliability assessment?
+
+We hypothesized that disagreement between an anatomical property estimated from the hidden representation and the same property measured from the final mask could expose failures that conventional confidence does not capture. For example, the representation may indicate one tumor composition while the final segmentation expresses another, even when the output probabilities appear confident.
+
+The positive endpoint is **failure triage**: rank cases for human review using confidence plus representation–output consistency gaps, evaluated under nested cross-validation on 375 held-out cases.
+
+---
+
 ## Main result
 
-On 375 BraTS 2021 validation cases, nested cross-validation (5 outer / 4 inner folds, seed 42) with 5000 paired bootstrap replicates.
+On **375** BraTS 2021 validation cases. Primary endpoint: **lowest-quality 20%** by mean foreground Dice (77 positive cases). Evaluation: **nested CV** (5 outer / 4 inner folds, model seed 42) with **5000 paired case-level bootstrap** replicates. All methods share the same outer folds and failure labels.
 
-**Detecting the lowest-quality 20% of segmentations** (by mean foreground Dice):
+**Detecting the lowest-quality 20% of segmentations:**
 
-| Method | AUPRC | Capture at 20% review |
-|---|---:|---:|
-| Confidence only | 0.805 | 71.4% |
-| Confidence + morphology | 0.851 | 75.3% |
-| Confidence + pooled representations | 0.854 | 74.0% |
-| Confidence + representation–output consistency | **0.895** | **79.2%** |
+| Method | AUPRC | AUROC | Capture @ 20% review | Brier |
+|---|---:|---:|---:|---:|
+| Confidence only (primary baseline) | 0.805 | 0.931 | 71.4% | 0.102 |
+| Confidence + morphology | 0.851 | 0.954 | 75.3% | 0.077 |
+| Confidence + pooled representations | 0.854 | 0.948 | 74.0% | 0.081 |
+| **Confidence + representation–output consistency** | **0.895** | **0.960** | **79.2%** | **0.064** |
 
-- AUPRC gain vs confidence: **+0.090** (paired bootstrap 95% CI **[0.031, 0.152]**).
-- Confidence + consistency beat confidence in about **99.8%** of bootstrap samples.
-- For mean foreground Dice &lt; 0.70, AUPRC improved from **0.770** to **0.887**.
-- Benefit for edema-specific failure labels was limited (morphology-augmented confidence often did better there).
+**Confidence + consistency vs confidence only** (paired bootstrap):
+
+| Metric | Δ (proposed − baseline) | 95% CI | P(proposed better) |
+|---|---:|---|---:|
+| AUPRC | **+0.090** | **[0.031, 0.152]** | 99.8% |
+| Capture @ 20% | **+0.086** | **[0.013, 0.165]** | 97.7% |
+| Mean Dice @ 80% coverage | +0.004 | [0.000, 0.009] | 98.2% |
+| AURC (lower is better) | −0.001 | [−0.008, +0.006] | 44.5% |
+
+**Secondary endpoint — mean foreground Dice &lt; 0.70** (73 cases):
+
+| Method | AUPRC |
+|---|---:|
+| Confidence only | 0.770 |
+| **Confidence + consistency** | **0.887** |
+
+Bootstrap vs confidence: ΔAUPRC **+0.115** [0.056, 0.185], P(better) **100%**; ΔCapture@20 **+0.096** [0.016, 0.183], P(better) **98.8%**.
+
+**Stability:** confidence + consistency wins **5/5** outer folds on both primary and secondary endpoints. Classifier-only retrain across seeds 42 / 123 / 2026 gives identical held-out scores (features frozen).
+
+**Where it helps less:** edema-specific labels (`edema_lt_0.70`: ΔAUPRC +0.006 vs confidence; `lowest20_edema`: proposed 0.779 vs confidence 0.794). Morphology-augmented confidence is often stronger there.
 
 These are research quality-control metrics—not a claim of clinical benefit or deployment readiness.
 
-Canonical numbers: `outputs_confidence_consistency_triage_20260712_030902/aggregate_metrics.csv` and `bootstrap_comparisons.csv`. Broader baseline tables: `outputs_method_validation/`.
+Canonical numbers: `outputs_confidence_consistency_triage_20260712_030902/aggregate_metrics.csv`, `bootstrap_comparisons.csv`. Full baseline tables, ablations, and figures: `outputs_method_validation/validation_summary.md`.
+
+---
+
+## What we compare against (baselines) and why
+
+The **primary baseline is confidence only**: case-level statistics derived from the model’s own **TTA-averaged softmax probabilities** on the predicted mask (8 flips, overlap 0.25). Features include foreground/boundary mean max-probability, predictive entropy, class-margin summaries, and low-confidence voxel fractions (`outputs_layer_aware_latent_risk/case_level_confidence_features.csv`).
+
+We use this baseline because it is the standard cheap signal available **at inference time** without ground truth: if the network’s probabilities are flat or contradictory, the case may need review. We call this **predictive entropy**, not epistemic uncertainty—no separate mutual-information estimate is used.
+
+**Augmented baselines** test whether consistency adds information beyond obvious alternatives:
+
+| Baseline | What it uses | Why include it |
+|---|---|---|
+| **Morphology only** | Tumor composition, volume, and shape measured from the **predicted** mask | Captures anatomically implausible outputs without internal representations |
+| **Confidence + morphology** | Both signal families | Strong composite QC baseline |
+| **Pooled representations** | Global-pooled activations from nine U-Net stages | Tests whether raw embeddings alone flag failures |
+| **Confidence + pooled** | Confidence + pooled reps | Representation-aware baseline without explicit consistency |
+| **Direct Dice probe** | Ridge probe predicting Dice from representations | Tests whether a single quality readout beats structured gaps |
+| **Consistency only** | Gap features without confidence | Shows gaps are not sufficient alone (AUPRC 0.725 primary) |
+
+The proposed method **augments** confidence with representation–output gaps; it does not replace confidence. Consistency-only underperforms confidence-only on the primary endpoint.
+
+**Feature ablation (primary endpoint):** removing enhancing-fraction gaps drops AUPRC from 0.886 to **0.773** (below confidence 0.805). Other anatomy families (edema, volume, necrosis, compactness) can be dropped with little or no loss—enhancing-composition disagreement carries most of the gain.
 
 ---
 
@@ -56,6 +110,8 @@ relative_gap = abs(representation_estimate - predicted_mask_measurement)
 **Inference-time rule:** the triage score does not take ground-truth masks or GT-linked error maps as inputs. Ground truth is used only to fit probes inside training folds, define failure labels, and evaluate held-out performance.
 
 Refer to features as representation–output enhancing-fraction gaps, edema-fraction gaps, whole-tumor-volume gaps, and so on—even when code columns still use historical names.
+
+**What drives the signal:** held-out permutation importance ranks enhancing-fraction relative gaps first (mean AUPRC drop **0.257** when shuffled). Top correlations with mean foreground Dice include enhancing-fraction relative gap (ρ = −0.30) and boundary-complexity gaps (|ρ| ≈ 0.23–0.26). See `outputs_method_validation/feature_permutation_importance.csv` and `feature_outcome_correlations.csv`.
 
 ---
 
