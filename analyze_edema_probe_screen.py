@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal screening: decoder1 edema probe vs RMS-matched random controls (30 cases)."""
+"""Minimal screening: decoder1 edema probe vs unit-norm random controls (30 cases)."""
 
 from __future__ import annotations
 

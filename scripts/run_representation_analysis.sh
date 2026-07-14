@@ -9,7 +9,7 @@ source .venv/bin/activate 2>/dev/null || true
 CONFIG=configs/ten_hour.yaml
 CKPT=outputs_10hour/checkpoints/checkpoint_latest.pt
 FAILURE=outputs_10hour/failure_tables/failure_metrics.csv
-LAYER_INDEX=outputs_10hour/layer_embeddings/layer_index.csv
+LAYER_INDEX=outputs_10hour/layer_embeddings/layer_embedding_index.csv
 
 echo "=== Learn semantic directions ==="
 python learn_semantic_directions.py \

@@ -18,16 +18,17 @@ from sklearn.model_selection import KFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.analysis.baselines import _impute_nan, create_bad_case_label
-from src.analysis.layer_analysis import (
+from src.analysis.layer_io import (
     ANATOMY_TARGET_SPECS,
     DEPTH_LABELS,
     LAYER_ORDER,
     build_anatomy_table,
+    create_bad_case_label,
+    impute_nan,
     load_layer_index,
     load_layer_matrix,
+    prepare_merged,
 )
-from src.analysis.layer_holdout import _prepare_merged
 from src.models.unet3d import LAYER_NAMES
 from src.utils.io import ensure_dir
 
@@ -46,7 +47,7 @@ def _oof_ridge_metrics(
 ) -> dict[str, float]:
     """Fold-safe OOF Ridge regression metrics on a subset."""
     y = np.asarray(y, dtype=np.float64)
-    x = _impute_nan(x)
+    x = impute_nan(x)
     if len(y) < 4 or np.std(y) < 1e-12:
         return {"r2": float("nan"), "mae": float("nan"), "spearman": float("nan")}
 
@@ -84,8 +85,8 @@ def _fit_ridge_predict(
             ("model", RidgeCV(alphas=np.logspace(-2, 3, 20))),
         ]
     )
-    pipe.fit(_impute_nan(x_train), y_train)
-    return pipe.predict(_impute_nan(x_test))
+    pipe.fit(impute_nan(x_train), y_train)
+    return pipe.predict(impute_nan(x_test))
 
 
 def _locked_ridge_metrics(
@@ -176,7 +177,7 @@ def run_layer_holdout_recoverability(
     output_dir = ensure_dir(output_dir)
     figures_dir = ensure_dir(output_dir / "figures")
 
-    merged = _prepare_merged(layer_index_path, failure_table_path)
+    merged = prepare_merged(layer_index_path, failure_table_path)
     failure_df = pd.read_csv(failure_table_path)
     anatomy_df = build_anatomy_table(merged, failure_df)
 

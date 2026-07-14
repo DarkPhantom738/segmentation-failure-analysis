@@ -14,23 +14,26 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from src.analysis.edema_probe_screen import (
+from src.analysis.probe_screen_common import (
     N_PER_BIN,
+    PUBLICATION_RC,
+    analytical_probe_before_after,
+    load_existing_probe_rows,
+    mean_gap,
+    mean_perturbation_ratio,
+    screening_rng,
     select_stratified_cases,
-    _screening_rng,
-    _unit_random_direction,
+    unit_random_direction,
 )
 from src.analysis.layer_interventions import compute_prediction_quantities
 from src.analysis.semantic_directions import SemanticDirection
 from src.data.brats_dataset import BraTSCase
-from src.models.unet3d import UNet3D, build_model
-from src.training.decoder2_cache_inference import (
+from src.models.unet3d import build_model
+from src.training.decoder_cache_inference import (
     capture_decoder2_patches,
     downstream_prediction_from_decoder2_cache,
 )
 from src.utils.io import ensure_dir
-
-PUBLICATION_RC = {"figure.dpi": 150, "savefig.dpi": 300, "font.size": 10}
 
 PROBE_DIRECTION_ID = "decoder2::gt_wt_voxels"
 PROBE_ALPHA = 1.0
@@ -39,69 +42,6 @@ EDITING_RESULTS = Path("outputs_10hour/representation_editing/editing_results.cs
 DIRECTION_PATH = Path(
     "outputs_10hour/semantic_directions/directions/decoder2__gt_wt_voxels.npz"
 )
-
-
-def _mean_gap(d2_patches: list[torch.Tensor]) -> np.ndarray:
-    gaps = [
-        torch.nn.functional.adaptive_avg_pool3d(d2.float(), 1).flatten().cpu().numpy()
-        for d2 in d2_patches
-    ]
-    return np.mean(np.stack(gaps, axis=0), axis=0)
-
-
-def _mean_perturbation_ratio(
-    model: UNet3D,
-    d2_patches: list[torch.Tensor],
-    channel_delta: np.ndarray,
-    alpha: float,
-) -> float:
-    ratios: list[float] = []
-    delta = torch.as_tensor(channel_delta, dtype=torch.float32)
-    for d2 in d2_patches:
-        edited = model.apply_channel_perturbation(d2, delta, alpha)
-        ratios.append(float(model.rms_perturbation_ratio(d2, edited).item()))
-    return float(np.mean(ratios))
-
-
-def analytical_probe_predict(gap: np.ndarray, direction: SemanticDirection) -> float:
-    gap = np.asarray(gap, dtype=np.float64).reshape(-1)
-    x_scaled = (gap - direction.scaler_mean) / direction.scaler_scale
-    return float(np.dot(direction.probe_coef_scaled, x_scaled) + direction.probe_intercept)
-
-
-def analytical_probe_before_after(
-    gap_before: np.ndarray,
-    direction: SemanticDirection,
-    alpha: float,
-    channel_delta: np.ndarray,
-) -> tuple[float, float, float]:
-    gap_before = np.asarray(gap_before, dtype=np.float64).reshape(-1)
-    gap_after = gap_before + float(alpha) * np.asarray(channel_delta, dtype=np.float64).reshape(-1)
-    pred_before = analytical_probe_predict(gap_before, direction)
-    pred_after = analytical_probe_predict(gap_after, direction)
-    return pred_before, pred_after, pred_after - pred_before
-
-
-def _load_existing_probe_rows(editing_df: pd.DataFrame, case_ids: list[str]) -> pd.DataFrame:
-    sub = editing_df[
-        (editing_df["direction_id"] == PROBE_DIRECTION_ID)
-        & (editing_df["metric"] == "tumor_volume")
-        & (editing_df["alpha"].isin([-PROBE_ALPHA, PROBE_ALPHA]))
-        & (editing_df["case_id"].isin(case_ids))
-    ].copy()
-    dice = editing_df[
-        (editing_df["direction_id"] == PROBE_DIRECTION_ID)
-        & (editing_df["metric"] == "dice")
-        & (editing_df["alpha"].isin([-PROBE_ALPHA, PROBE_ALPHA]))
-        & (editing_df["case_id"].isin(case_ids))
-    ][["case_id", "alpha", "baseline_value", "edited_value", "delta"]].rename(
-        columns={
-            "baseline_value": "dice_before",
-            "edited_value": "dice_after",
-            "delta": "dice_delta",
-        }
-    )
-    return sub.merge(dice, on=["case_id", "alpha"], how="left")
 
 
 def _opposite_sign_rate(probe_df: pd.DataFrame, value_col: str) -> float:
@@ -162,14 +102,16 @@ def run_volume_probe_screen(
     case_ids = selected["case_id"].tolist()
 
     editing_df = pd.read_csv(editing_results_path)
-    existing_probe = _load_existing_probe_rows(editing_df, case_ids)
+    existing_probe = load_existing_probe_rows(
+        editing_df, case_ids, PROBE_DIRECTION_ID, "tumor_volume", PROBE_ALPHA
+    )
 
     probe_direction = SemanticDirection.load(direction_path)
     probe_delta_vec = probe_direction.activation_direction.astype(np.float64)
 
-    rng = _screening_rng(random_seed + 1)
+    rng = screening_rng(random_seed + 1)
     random_directions = [
-        _unit_random_direction(probe_direction.activation_channels, rng)
+        unit_random_direction(probe_direction.activation_channels, rng)
         for _ in range(n_random)
     ]
 
@@ -183,7 +125,7 @@ def run_volume_probe_screen(
     num_classes = config["model"]["num_classes"]
     data_cfg = config["data"]
     if overlap is None:
-        overlap = float(config.get("uncertainty", {}).get("overlap", 0.25))
+        overlap = float(config.get("inference", config.get("uncertainty", {})).get("overlap", 0.25))
 
     rows: list[dict[str, Any]] = []
 
@@ -206,8 +148,8 @@ def run_volume_probe_screen(
         origins, d2_patches, s1_patches, vol_shape = capture_decoder2_patches(
             model, image_tensor, patch_size, overlap, device
         )
-        gap_before = _mean_gap(d2_patches)
-        perturbation_ratio = _mean_perturbation_ratio(
+        gap_before = mean_gap(d2_patches)
+        perturbation_ratio = mean_perturbation_ratio(
             model, d2_patches, probe_delta_vec, PROBE_ALPHA
         )
 

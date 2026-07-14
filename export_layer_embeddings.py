@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/five_epoch_533.yaml"),
+        default=Path("configs/ten_hour.yaml"),
         help="Training config YAML.",
     )
     parser.add_argument(
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
         "--overlap",
         type=float,
         default=None,
-        help="Sliding-window overlap (default: config uncertainty.overlap).",
+        help="Sliding-window overlap (default: config inference.overlap).",
     )
     parser.add_argument(
         "--max-cases",

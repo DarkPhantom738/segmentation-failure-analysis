@@ -9,7 +9,7 @@ __pycache__/
 # Data (repo-root BraTS/cache only; do not ignore src/data/)
 /data/
 
-# Experiment outputs (default: ignore)
+# Experiment outputs (ignore if recreated; only outputs_10hour curated findings are tracked)
 outputs/
 outputs_fast/
 outputs_midscale/
@@ -17,7 +17,7 @@ outputs_fullscale/
 outputs_30min/
 outputs_5epoch_533/
 
-# outputs_10hour: ignore bulk artifacts, track curated findings below
+# outputs_10hour: ignore bulk artifacts; track curated probing/editing/ablation findings
 outputs_10hour/*
 !outputs_10hour/failure_tables/
 !outputs_10hour/layer_holdout_recoverability/
@@ -39,3 +39,21 @@ outputs_10hour/layer_interventions/matched_baseline/ablation_results.csv
 outputs_10hour/semantic_directions/*
 !outputs_10hour/semantic_directions/directions/
 !outputs_10hour/semantic_directions/directions/**
+!outputs_10hour/semantic_directions/semantic_directions_catalog.csv
+
+# Paper method + validation curated outputs (exclude logs/checkpoints/arrays)
+!outputs_consistency_failure_detection/
+!outputs_confidence_consistency_triage/
+!outputs_confidence_consistency_triage_*/
+!outputs_layer_aware_latent_risk/
+!outputs_method_validation/
+!outputs_decoder1_repair_diagnostics/
+!outputs_fast_classifier_inverted_repair/
+!outputs_fast_spatial_repair/
+!outputs_fast_spatial_repair_sanity/
+
+**/*.log
+**/*.pt
+**/examples/
+**/predictions/
+**/interim*/

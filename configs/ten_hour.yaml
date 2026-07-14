@@ -1,5 +1,4 @@
-# ~10 hour Failure Cartography run on Apple MPS
-# Full BraTS training set with a large validation split for reliable baselines
+# ~10 hour BraTS run on Apple MPS (probing / ablation / editing study)
 
 seed: 42
 
@@ -7,7 +6,7 @@ data:
   root: "/path/to/BraTS2021_Training_Data"
   # Use the entire available training archive
   max_cases: null
-  # Large holdout so embedding / uncertainty tests are statistically useful
+  # Large holdout for stable probing and intervention estimates
   val_fraction: 0.30
   target_spacing: [2.0, 2.0, 2.0]
   percentile_clip: [1.0, 99.0]
@@ -38,8 +37,8 @@ output:
   dir: "outputs_10hour"
   checkpoint_dir: "outputs_10hour/checkpoints"
 
-uncertainty:
-  enabled: true
-  export_during_validation: false
+inference:
+  # Sliding-window overlap for export / editing / ablation
   overlap: 0.25
-  max_augmentations: 8
+  # TTA settings (only needed to rebuild failure_metrics.csv)
+  tta_augmentations: 8

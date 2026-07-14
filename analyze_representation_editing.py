@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
             "selectivity of downstream anatomical properties."
         )
     )
-    parser.add_argument("--config", type=Path, default=Path("configs/five_epoch_533.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/ten_hour.yaml"))
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--failure-table", type=Path, required=True)
     parser.add_argument(

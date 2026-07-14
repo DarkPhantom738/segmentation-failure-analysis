@@ -31,7 +31,7 @@ PUBLICATION_RC = {
     "font.size": 10,
 }
 
-INTERVENTIONS = ("zero", "mean", "noise")
+INTERVENTIONS = ("mean",)
 
 METRIC_SPECS: dict[str, str] = {
     "dice": "Dice",
@@ -205,93 +205,6 @@ def build_intervention_strength_summary(
     return pd.DataFrame(rows).sort_values(["intervention", "mean_rho"])
 
 
-def backfill_rho_only(
-    config: dict,
-    checkpoint_path: Path,
-    failure_table_path: Path,
-    output_dir: Path,
-    device: torch.device,
-    overlap: float | None = None,
-    max_cases: int | None = None,
-    layers: tuple[str, ...] = LAYER_NAMES,
-    interventions: tuple[str, ...] = INTERVENTIONS,
-) -> pd.DataFrame:
-    """
-    Compute rho for cached predictions without overwriting masks or restarting ablations.
-    """
-    output_dir = ensure_dir(output_dir)
-    pred_dir = output_dir / "predictions"
-    failure_df = pd.read_csv(failure_table_path)
-    if max_cases is not None and max_cases > 0:
-        failure_df = failure_df.head(max_cases)
-
-    model = build_model(config)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.to(device)
-    model.eval()
-
-    patch_size = config["data"]["patch_size"]
-    num_classes = config["model"]["num_classes"]
-    data_cfg = config["data"]
-    if overlap is None:
-        overlap = float(config.get("uncertainty", {}).get("overlap", 0.25))
-
-    rho_df = load_rho_log(output_dir)
-    for record in tqdm(failure_df.to_dict(orient="records"), desc="Backfill rho"):
-        case_id = str(record["case_id"])
-        loader = BraTSCase(
-            case_id=case_id,
-            data_root=Path(data_cfg["root"]),
-            modalities=data_cfg["modalities"],
-            target_spacing=data_cfg["target_spacing"],
-            percentile_clip=data_cfg["percentile_clip"],
-        )
-        image, _ = loader.load()
-        image_tensor = torch.from_numpy(image)
-
-        for layer_name in layers:
-            for intervention in interventions:
-                pred_path = pred_dir / layer_name / intervention / f"{case_id}.npy"
-                if not pred_path.exists():
-                    continue
-                if _rho_is_logged(rho_df, case_id, layer_name, intervention):
-                    continue
-                seed = _case_seed(case_id, layer_name, intervention)
-                _, rho_mean, rho_std = intervention_prediction(
-                    model=model,
-                    image=image_tensor,
-                    patch_size=patch_size,
-                    num_classes=num_classes,
-                    ablate_layer=layer_name,
-                    intervention=intervention,
-                    overlap=overlap,
-                    device=device,
-                    seed=seed,
-                )
-                rho_df = _append_rho_log(
-                    output_dir, rho_df, case_id, layer_name, intervention, rho_mean, rho_std
-                )
-
-    summary_path = output_dir / "ablation_summary.csv"
-    if not summary_path.exists():
-        for interim in (
-            output_dir / "interim_27cases/ablation_summary.csv",
-            output_dir / "interim_14cases/ablation_summary.csv",
-        ):
-            if interim.exists():
-                summary_path = interim
-                break
-    if summary_path.exists():
-        summary_df = pd.read_csv(summary_path)
-    else:
-        summary_df = pd.DataFrame()
-    if not summary_df.empty:
-        strength = build_intervention_strength_summary(rho_df, summary_df)
-        strength.to_csv(output_dir / "intervention_strength_summary.csv", index=False)
-    return rho_df
-
-
 def _build_ablation_artifacts(
     results_df: pd.DataFrame,
     rho_df: pd.DataFrame,
@@ -343,7 +256,7 @@ def _build_ablation_artifacts(
 
     _plot_degradation_heatmap(summary_df, figures_dir / "heatmap_mean_degradation.png")
     _plot_layer_metric_bars(
-        summary_df, intervention="zero", output_path=figures_dir / "bar_degradation_zero.png"
+        summary_df, intervention="mean", output_path=figures_dir / "bar_degradation_mean.png"
     )
 
     report = _generate_ablation_report(
@@ -440,7 +353,7 @@ def recompute_ablation_with_matched_baseline(
     num_classes = config["model"]["num_classes"]
     data_cfg = config["data"]
     if overlap is None:
-        overlap = float(config.get("uncertainty", {}).get("overlap", 0.25))
+        overlap = float(config.get("inference", config.get("uncertainty", {})).get("overlap", 0.25))
 
     rho_df = load_rho_log(output_dir)
     result_rows: list[dict[str, Any]] = []
@@ -566,13 +479,12 @@ def run_layer_ablations(
     max_cases: int | None = None,
     layers: tuple[str, ...] = LAYER_NAMES,
     interventions: tuple[str, ...] = INTERVENTIONS,
-    save_predictions: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """
-    Run Part 1 layer ablations: zero / mean / noise replacement per layer.
+    Mean-ablate each layer and score against existing validation predictions.
 
-    Baseline metrics are computed from existing predictions in failure_metrics.csv.
-    Ablated metrics require re-inference with the intervention forward pass.
+    Caches ablated masks under ``predictions/`` so ``--recompute-matched-baseline``
+    can rescore without re-running inference. Skips cases already cached with ρ.
     """
     output_dir = ensure_dir(output_dir)
     pred_dir = ensure_dir(output_dir / "predictions")
@@ -591,7 +503,7 @@ def run_layer_ablations(
     num_classes = config["model"]["num_classes"]
     data_cfg = config["data"]
     if overlap is None:
-        overlap = float(config.get("uncertainty", {}).get("overlap", 0.25))
+        overlap = float(config.get("inference", config.get("uncertainty", {})).get("overlap", 0.25))
 
     result_rows: list[dict[str, Any]] = []
     rho_df = load_rho_log(output_dir)
@@ -655,10 +567,10 @@ def run_layer_ablations(
                         device=device,
                         seed=seed,
                     )
-                    if not has_pred and save_predictions:
+                    if not has_pred:
                         ensure_dir(pred_path.parent)
                         np.save(pred_path, ablated_pred)
-                    elif has_pred:
+                    else:
                         ablated_pred = np.load(pred_path).astype(np.int16)
                     if not has_rho:
                         rho_df = _append_rho_log(
@@ -712,7 +624,7 @@ def run_layer_ablations(
 
 def _plot_degradation_heatmap(summary_df: pd.DataFrame, output_path: Path) -> None:
     plt.rcParams.update(PUBLICATION_RC)
-    plot_df = summary_df[summary_df["intervention"] == "zero"].copy()
+    plot_df = summary_df[summary_df["intervention"] == "mean"].copy()
     if plot_df.empty:
         return
     pivot = plot_df.pivot(index="layer", columns="metric_label", values="mean_degradation")
@@ -724,7 +636,7 @@ def _plot_degradation_heatmap(summary_df: pd.DataFrame, output_path: Path) -> No
     ax.set_xticklabels(pivot.columns, rotation=45, ha="right", fontsize=7)
     ax.set_yticks(range(len(pivot.index)))
     ax.set_yticklabels(pivot.index)
-    ax.set_title("Mean degradation after zero ablation (higher = worse)")
+    ax.set_title("Mean degradation after mean ablation (higher = worse)")
     fig.colorbar(im, ax=ax, fraction=0.02)
     fig.tight_layout()
     fig.savefig(output_path, bbox_inches="tight")
@@ -768,66 +680,58 @@ def _generate_ablation_report(
     n_cases: int,
     baseline_description: str = "existing validation predictions (no ablation)",
 ) -> str:
-    report = f"""# Layer Intervention Report (Part 1 — Ablation)
+    report = f"""# Layer Ablation Report
 
 **Cases:** {n_cases}  
-**Interventions:** zero, mean, noise (per-layer activation replacement)  
+**Intervention:** mean ablation (replace activations with per-channel spatial mean)  
 **Baseline:** {baseline_description}
 
 ## Ablation semantics
 
-| Layer | Intervention type |
-|-------|-------------------|
-| encoder1–encoder4 | **Skip ablation** — encoder runs normally; only the skip tensor at decode fusion is replaced |
-| bottleneck | Replace bottleneck map, then decode |
-| decoder4–decoder1 | Replace decoder block output, continue downstream decoding |
+| Layer | What is replaced |
+|-------|------------------|
+| encoder1–encoder4 | Skip tensor at decode fusion (encoder still runs) |
+| bottleneck | Bottleneck map, then decode |
+| decoder4–decoder1 | Decoder block output, continue downstream |
 
-**Interpretation:** mean ablation is the primary read (removes case-specific spatial detail while preserving scale). Zero and noise are sanity checks. Compare layers using `intervention_strength_summary.csv` (degradation per unit ρ) — raw degradation alone is not comparable across layers. Results measure **functional dependence on intact spatial activations**, not necessity of any single probe direction.
+Mean ablation removes case-specific spatial detail while preserving channel scale. Results measure **functional dependence on intact spatial activations**, not necessity of any single probe direction.
 
 Positive `mean_degradation` means the metric got worse after ablation.
 """
     if "matched" in baseline_description.lower():
         report += """
-**Primary baseline:** matched sliding-window inference. Scoring against TTA validation predictions is a robustness analysis (`baseline_comparison.md` when available).
+**Primary baseline:** matched sliding-window inference. Scoring against TTA validation predictions is a robustness check (`baseline_comparison.md` when available).
 """
     elif "TTA" in baseline_description or "failure_metrics" in baseline_description:
         report += """
-**Note:** Prefer `matched_baseline/` for manuscript tables when available. TTA-baseline scoring is a robustness analysis.
+**Note:** Prefer `matched_baseline/` for manuscript tables when available.
 """
     report += """
 ## Perturbation strength (ρ = ||A - A'|| / ||A||)
 
-| Layer | zero ρ | mean ρ | noise ρ | Dice deg/ρ (mean) |
-|-------|--------|--------|---------|-------------------|
+| Layer | mean ρ | Dice deg/ρ |
+|-------|--------|------------|
 """
     if not strength_df.empty:
         for layer in LAYER_NAMES:
-            z = strength_df[
-                (strength_df["layer"] == layer) & (strength_df["intervention"] == "zero")
-            ]
             m = strength_df[
                 (strength_df["layer"] == layer) & (strength_df["intervention"] == "mean")
             ]
-            n = strength_df[
-                (strength_df["layer"] == layer) & (strength_df["intervention"] == "noise")
-            ]
-            z_rho = f"{z['mean_rho'].iloc[0]:.3f}" if not z.empty else "n/a"
             m_rho = f"{m['mean_rho'].iloc[0]:.3f}" if not m.empty else "n/a"
-            n_rho = f"{n['mean_rho'].iloc[0]:.3f}" if not n.empty else "n/a"
             deg_per_rho = (
                 f"{m['dice_degradation_per_rho'].iloc[0]:.3f}"
                 if not m.empty and "dice_degradation_per_rho" in m.columns
                 else "n/a"
             )
-            report += f"| {layer} | {z_rho} | {m_rho} | {n_rho} | {deg_per_rho} |\n"
+            report += f"| {layer} | {m_rho} | {deg_per_rho} |\n"
 
     report += """
-## Top degradations — zero ablation
+## Top degradations — mean ablation
 
 """
-    zero_rank = ranking_df[ranking_df["intervention"] == "zero"].copy()
+    mean_rank = ranking_df[ranking_df["intervention"] == "mean"].copy()
     for layer in LAYER_NAMES:
-        sub = zero_rank[(zero_rank["layer"] == layer) & (zero_rank["rank"] <= 3)]
+        sub = mean_rank[(mean_rank["layer"] == layer) & (mean_rank["rank"] <= 3)]
         if sub.empty:
             continue
         report += f"\n### {layer}\n\n| Rank | Metric | Mean degradation |\n|------|--------|------------------|\n"
@@ -835,12 +739,12 @@ Positive `mean_degradation` means the metric got worse after ablation.
             report += f"| {int(row['rank'])} | {row['metric_label']} | {row['mean_degradation']:.4f} |\n"
 
     report += """
-## Cross-layer comparison (zero ablation, mean degradation)
+## Cross-layer comparison (mean ablation, mean degradation)
 
 | Layer | Dice | Volume | Edema frac | Enh frac | Boundary | FP | FN |
 |-------|------|--------|------------|----------|----------|----|----|
 """
-    zero_summary = summary_df[summary_df["intervention"] == "zero"]
+    mean_summary = summary_df[summary_df["intervention"] == "mean"]
     key_metrics = [
         "dice",
         "tumor_volume",
@@ -853,8 +757,8 @@ Positive `mean_degradation` means the metric got worse after ablation.
     for layer in LAYER_NAMES:
         row_vals = []
         for metric in key_metrics:
-            val = zero_summary[
-                (zero_summary["layer"] == layer) & (zero_summary["metric"] == metric)
+            val = mean_summary[
+                (mean_summary["layer"] == layer) & (mean_summary["metric"] == metric)
             ]["mean_degradation"]
             row_vals.append(f"{val.iloc[0]:.3f}" if not val.empty else "n/a")
         report += f"| {layer} | " + " | ".join(row_vals) + " |\n"
@@ -862,7 +766,6 @@ Positive `mean_degradation` means the metric got worse after ablation.
     report += """
 ## Artifacts
 
-- `ablation_results.csv` — per-case metrics
 - `ablation_summary.csv` — aggregated means
 - `degradation_ranking.csv` — ranked metric disruption per layer
 - `rho_log.csv` — per-case perturbation magnitude ρ

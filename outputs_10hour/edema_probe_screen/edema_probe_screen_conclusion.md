@@ -1,6 +1,6 @@
 # Edema Probe Screening Conclusion
 
-**The probe direction clearly outperforms matched random perturbations** on mean |Δ edema fraction| at |α|=1 with RMS-matched unit-norm directions.
+**The probe direction clearly outperforms matched random perturbations** on mean |Δ edema fraction| at |α|=1 with unit-norm matched random directions.
 
 | Metric | Probe | Random (mean) | Ratio |
 |--------|------:|--------------:|------:|

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze segmentation failures and uncertainty-error relationships."""
+"""Build the validation case table used by probing / editing / ablation."""
 
 from __future__ import annotations
 
@@ -12,46 +12,26 @@ from src.analysis.analyze import analyze_cases_from_metrics
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Compute segmentation failure labels and uncertainty-error metrics "
-            "from Milestone 2 artifacts."
+            "Build failure_metrics.csv from TTA export metrics "
+            "(train.py --export-tta). Committed results already include this table."
         )
     )
     parser.add_argument(
         "--metrics",
         type=Path,
-        default=Path("outputs/metrics_uncertainty.csv"),
-        help="Path to metrics_uncertainty.csv from Milestone 2.",
+        default=Path("outputs_10hour/metrics_uncertainty.csv"),
+        help="Metrics CSV from train.py --export-tta.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("outputs/failure_tables/failure_metrics.csv"),
-        help="Path to the output failure metrics CSV.",
+        default=Path("outputs_10hour/failure_tables/failure_metrics.csv"),
+        help="Output case table path.",
     )
-    parser.add_argument(
-        "--boundary-iterations",
-        type=int,
-        default=2,
-        help="Morphology iterations for GT tumor boundary band.",
-    )
-    parser.add_argument(
-        "--small-lesion-voxel-threshold",
-        type=int,
-        default=200,
-        help="Maximum component size (voxels) counted as a small lesion.",
-    )
-    parser.add_argument(
-        "--miss-fraction-threshold",
-        type=float,
-        default=0.5,
-        help="Component recall below this value counts as missed.",
-    )
-    parser.add_argument(
-        "--low-entropy-percentile",
-        type=float,
-        default=25.0,
-        help="Percentile threshold for low-entropy confident errors.",
-    )
+    parser.add_argument("--boundary-iterations", type=int, default=2)
+    parser.add_argument("--small-lesion-voxel-threshold", type=int, default=200)
+    parser.add_argument("--miss-fraction-threshold", type=float, default=0.5)
+    parser.add_argument("--low-entropy-percentile", type=float, default=25.0)
     return parser.parse_args()
 
 
@@ -61,7 +41,7 @@ def main() -> None:
     if not args.metrics.exists():
         raise FileNotFoundError(
             f"Metrics file not found: {args.metrics}. "
-            "Run Milestone 2 export first with --export-uncertainty."
+            "Run: python train.py --export-tta --checkpoint <ckpt>"
         )
 
     result = analyze_cases_from_metrics(
@@ -74,7 +54,7 @@ def main() -> None:
     )
 
     print(f"Analyzed {len(result)} validation case(s).")
-    print(f"Wrote failure metrics to: {args.output}")
+    print(f"Wrote case table to: {args.output}")
 
 
 if __name__ == "__main__":

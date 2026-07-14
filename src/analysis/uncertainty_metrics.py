@@ -88,35 +88,3 @@ def uncertainty_error_overlap(
     top_uncertain_mask = analysis_region & (entropy >= threshold)
     captured_errors = int((error_mask & top_uncertain_mask).sum())
     return captured_errors / error_count
-
-
-def false_negative_low_entropy_fraction(
-    false_negative_mask: np.ndarray,
-    entropy: np.ndarray,
-    analysis_region: np.ndarray,
-    low_percentile: float = 25.0,
-) -> float:
-    """Fraction of false-negative voxels with entropy below the low percentile."""
-    false_negative_count = int(false_negative_mask.sum())
-    if false_negative_count == 0:
-        return float("nan")
-
-    threshold = np.percentile(entropy[analysis_region], low_percentile)
-    low_entropy_false_negatives = false_negative_mask & (entropy < threshold)
-    return int(low_entropy_false_negatives.sum()) / false_negative_count
-
-
-def false_positive_high_entropy_fraction(
-    false_positive_mask: np.ndarray,
-    entropy: np.ndarray,
-    analysis_region: np.ndarray,
-    high_percentile: float = 75.0,
-) -> float:
-    """Fraction of false-positive voxels with entropy above the high percentile."""
-    false_positive_count = int(false_positive_mask.sum())
-    if false_positive_count == 0:
-        return float("nan")
-
-    threshold = np.percentile(entropy[analysis_region], high_percentile)
-    high_entropy_false_positives = false_positive_mask & (entropy > threshold)
-    return int(high_entropy_false_positives.sum()) / false_positive_count

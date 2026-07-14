@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point for Failure Cartography training and artifact export."""
+"""Train a 3D U-Net on BraTS and export validation predictions."""
 
 from __future__ import annotations
 
@@ -27,29 +27,32 @@ def load_config(config_path: Path) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train a 3D U-Net on BraTS and export validation embeddings."
+        description="Train a 3D U-Net on BraTS and export validation artifacts."
     )
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/default.yaml"),
+        default=Path("configs/ten_hour.yaml"),
         help="Path to YAML configuration file.",
     )
     parser.add_argument(
         "--export-only",
         action="store_true",
-        help="Skip training and only export validation artifacts from a checkpoint.",
+        help="Skip training; export non-TTA validation predictions from a checkpoint.",
     )
     parser.add_argument(
-        "--export-uncertainty",
+        "--export-tta",
         action="store_true",
-        help="Export TTA uncertainty maps for validation cases from a checkpoint.",
+        help=(
+            "Export TTA validation predictions/entropy (needed only to rebuild "
+            "failure_metrics.csv)."
+        ),
     )
     parser.add_argument(
         "--checkpoint",
         type=Path,
         default=None,
-        help="Checkpoint path used with --export-only.",
+        help="Checkpoint path used with --export-only / --export-tta.",
     )
     parser.add_argument(
         "--epochs",
@@ -99,8 +102,8 @@ def main() -> None:
         device=device,
     )
 
-    if args.export_only and args.export_uncertainty:
-        raise ValueError("Use only one of --export-only or --export-uncertainty.")
+    if args.export_only and args.export_tta:
+        raise ValueError("Use only one of --export-only or --export-tta.")
 
     if args.export_only:
         checkpoint_path = args.checkpoint or Path(
@@ -115,9 +118,7 @@ def main() -> None:
         print(f"Exported validation artifacts — mean whole-tumor Dice: {mean_dice:.4f}")
         return
 
-    if args.export_uncertainty:
-        if not config.get("uncertainty", {}).get("enabled", False):
-            print("Warning: uncertainty.enabled is false in config; proceeding with export.")
+    if args.export_tta:
         checkpoint_path = args.checkpoint or Path(
             config["output"]["checkpoint_dir"]
         ) / "checkpoint_latest.pt"
@@ -126,8 +127,8 @@ def main() -> None:
         checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         epoch = int(checkpoint.get("epoch", 0))
-        mean_dice = trainer.export_uncertainty_artifacts(epoch)
-        print(f"Exported TTA uncertainty artifacts — mean whole-tumor Dice: {mean_dice:.4f}")
+        mean_dice = trainer.export_tta_artifacts(epoch)
+        print(f"Exported TTA artifacts — mean whole-tumor Dice: {mean_dice:.4f}")
         return
 
     trainer.train()

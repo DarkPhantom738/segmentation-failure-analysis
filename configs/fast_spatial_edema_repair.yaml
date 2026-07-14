@@ -1,0 +1,47 @@
+# Fast spatial edema-repair feasibility experiment (train partition only)
+
+seed: 42
+feasibility_seed: 20260711
+
+data:
+  root: "data/BraTS2021_Training"
+  max_cases: null
+  val_fraction: 0.30
+  target_spacing: [2.0, 2.0, 2.0]
+  percentile_clip: [1.0, 99.0]
+  patch_size: [64, 64, 64]
+  modalities: ["t1", "t1ce", "t2", "flair"]
+  cache_dir: "outputs_10hour/cache"
+
+model:
+  in_channels: 4
+  num_classes: 4
+  base_features: 32
+  embedding_dim: 128
+
+checkpoint: "outputs_10hour/checkpoints/checkpoint_epoch_005.pt"
+probe_direction: "outputs_10hour/semantic_directions/directions/decoder1__gt_edema_frac.npz"
+
+split:
+  n_train: 12
+  n_dev: 6
+  n_test: 6
+  score_pool: 90
+
+training:
+  max_steps: 300
+  patience: 50
+  eval_every: 25
+  lr: 0.01
+  batch_size: 1
+  dilate_radius: 2
+  lambdas:
+    fidelity: 1.0
+    sparse: 0.01
+    direction: 0.1
+    off_target: 0.1
+
+inference:
+  overlap: 0.25
+
+output_dir: "outputs_fast_spatial_repair"

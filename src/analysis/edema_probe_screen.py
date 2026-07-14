@@ -14,120 +14,34 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
+from src.analysis.probe_screen_common import (
+    N_PER_BIN,
+    PUBLICATION_RC,
+    analytical_probe_delta,
+    load_existing_probe_rows,
+    mean_gap,
+    mean_perturbation_ratio,
+    screening_rng,
+    select_stratified_cases,
+    unit_random_direction,
+)
 from src.analysis.layer_interventions import compute_prediction_quantities
 from src.analysis.semantic_directions import SemanticDirection
 from src.data.brats_dataset import BraTSCase
-from src.models.unet3d import UNet3D, build_model
-from src.training.decoder1_cache_inference import (
+from src.models.unet3d import build_model
+from src.training.decoder_cache_inference import (
     capture_decoder1_patches,
     downstream_prediction_from_cache,
 )
 from src.utils.io import ensure_dir
 
-PUBLICATION_RC = {"figure.dpi": 150, "savefig.dpi": 300, "font.size": 10}
-
 PROBE_DIRECTION_ID = "decoder1::gt_edema_frac"
 PROBE_ALPHA = 1.0
 N_RANDOM = 3
-N_PER_BIN = 10
 EDITING_RESULTS = Path("outputs_10hour/representation_editing/editing_results.csv")
 DIRECTION_PATH = Path(
     "outputs_10hour/semantic_directions/directions/decoder1__gt_edema_frac.npz"
 )
-
-
-def select_stratified_cases(
-    failure_df: pd.DataFrame, n_per_bin: int = N_PER_BIN, seed: int = 42
-) -> pd.DataFrame:
-    """Pick low / medium / high baseline-Dice cases (tertiles)."""
-    ranked = failure_df.sort_values("dice").reset_index(drop=True)
-    n = len(ranked)
-    bins = {
-        "low": ranked.iloc[: n // 3],
-        "medium": ranked.iloc[n // 3 : 2 * n // 3],
-        "high": ranked.iloc[2 * n // 3 :],
-    }
-    rng = np.random.default_rng(seed)
-    chosen: list[pd.DataFrame] = []
-    for label, sub in bins.items():
-        idx = rng.choice(len(sub), size=min(n_per_bin, len(sub)), replace=False)
-        part = sub.iloc[idx].copy()
-        part["dice_bin"] = label
-        chosen.append(part)
-    return pd.concat(chosen, ignore_index=True)
-
-
-def _screening_rng(seed: int) -> np.random.Generator:
-    return np.random.default_rng(seed)
-
-
-def _unit_random_direction(n_channels: int, rng: np.random.Generator) -> np.ndarray:
-    vec = rng.standard_normal(n_channels).astype(np.float64)
-    norm = np.linalg.norm(vec)
-    if norm < 1e-8:
-        vec[0] = 1.0
-        norm = 1.0
-    return vec / norm
-
-
-def _mean_gap(d1_patches: list[torch.Tensor]) -> np.ndarray:
-    gaps = [
-        torch.nn.functional.adaptive_avg_pool3d(d1.float(), 1).flatten().cpu().numpy()
-        for d1 in d1_patches
-    ]
-    return np.mean(np.stack(gaps, axis=0), axis=0)
-
-
-def _mean_perturbation_ratio(
-    model: UNet3D,
-    d1_patches: list[torch.Tensor],
-    channel_delta: np.ndarray,
-    alpha: float,
-) -> float:
-    ratios: list[float] = []
-    delta = torch.as_tensor(channel_delta, dtype=torch.float32)
-    for d1 in d1_patches:
-        edited = model.apply_channel_perturbation(d1, delta, alpha)
-        ratios.append(float(model.rms_perturbation_ratio(d1, edited).item()))
-    return float(np.mean(ratios))
-
-
-def analytical_probe_delta(
-    gap_before: np.ndarray,
-    direction: SemanticDirection,
-    alpha: float,
-    channel_delta: np.ndarray,
-) -> float:
-    """Expected Δ probe prediction from pooled activation and applied perturbation."""
-    gap_before = np.asarray(gap_before, dtype=np.float64).reshape(-1)
-    gap_after = gap_before + float(alpha) * np.asarray(channel_delta, dtype=np.float64).reshape(-1)
-    x_before = (gap_before - direction.scaler_mean) / direction.scaler_scale
-    x_after = (gap_after - direction.scaler_mean) / direction.scaler_scale
-    pred_before = float(np.dot(direction.probe_coef_scaled, x_before) + direction.probe_intercept)
-    pred_after = float(np.dot(direction.probe_coef_scaled, x_after) + direction.probe_intercept)
-    return pred_after - pred_before
-
-
-def _load_existing_probe_rows(editing_df: pd.DataFrame, case_ids: list[str]) -> pd.DataFrame:
-    sub = editing_df[
-        (editing_df["direction_id"] == PROBE_DIRECTION_ID)
-        & (editing_df["metric"] == "edema_fraction")
-        & (editing_df["alpha"].isin([-PROBE_ALPHA, PROBE_ALPHA]))
-        & (editing_df["case_id"].isin(case_ids))
-    ].copy()
-    dice = editing_df[
-        (editing_df["direction_id"] == PROBE_DIRECTION_ID)
-        & (editing_df["metric"] == "dice")
-        & (editing_df["alpha"].isin([-PROBE_ALPHA, PROBE_ALPHA]))
-        & (editing_df["case_id"].isin(case_ids))
-    ][["case_id", "alpha", "baseline_value", "edited_value", "delta"]].rename(
-        columns={
-            "baseline_value": "dice_before",
-            "edited_value": "dice_after",
-            "delta": "dice_delta",
-        }
-    )
-    return sub.merge(dice, on=["case_id", "alpha"], how="left")
 
 
 def run_edema_probe_screen(
@@ -151,13 +65,18 @@ def run_edema_probe_screen(
     case_ids = selected["case_id"].tolist()
 
     editing_df = pd.read_csv(editing_results_path)
-    existing_probe = _load_existing_probe_rows(editing_df, case_ids)
+    existing_probe = load_existing_probe_rows(
+        editing_df, case_ids, PROBE_DIRECTION_ID, "edema_fraction", PROBE_ALPHA
+    )
 
     probe_direction = SemanticDirection.load(direction_path)
     probe_delta_vec = probe_direction.activation_direction.astype(np.float64)
 
-    rng = _screening_rng(random_seed)
-    random_directions = [_unit_random_direction(probe_direction.activation_channels, rng) for _ in range(n_random)]
+    rng = screening_rng(random_seed)
+    random_directions = [
+        unit_random_direction(probe_direction.activation_channels, rng)
+        for _ in range(n_random)
+    ]
 
     model = build_model(config)
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -169,7 +88,7 @@ def run_edema_probe_screen(
     num_classes = config["model"]["num_classes"]
     data_cfg = config["data"]
     if overlap is None:
-        overlap = float(config.get("uncertainty", {}).get("overlap", 0.25))
+        overlap = float(config.get("inference", config.get("uncertainty", {})).get("overlap", 0.25))
 
     rows: list[dict[str, Any]] = []
 
@@ -192,8 +111,8 @@ def run_edema_probe_screen(
         origins, d1_patches, vol_shape = capture_decoder1_patches(
             model, image_tensor, patch_size, overlap, device
         )
-        gap_before = _mean_gap(d1_patches)
-        perturbation_ratio = _mean_perturbation_ratio(
+        gap_before = mean_gap(d1_patches)
+        perturbation_ratio = mean_perturbation_ratio(
             model, d1_patches, probe_delta_vec, PROBE_ALPHA
         )
 
@@ -334,7 +253,7 @@ def _plot_abs_edema_comparison(results_df: pd.DataFrame, path: Path) -> None:
         patch_artist=True,
     )
     ax.set_ylabel("|Δ edema fraction|")
-    ax.set_title("Probe vs random (matched |α|=1 RMS budget)")
+    ax.set_title("Probe vs random (unit-norm, |α|=1)")
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -379,7 +298,7 @@ def _build_conclusion(results_df: pd.DataFrame, ratio: float) -> str:
 
     return f"""# Edema Probe Screening Conclusion
 
-{verdict}on mean |Δ edema fraction| at |α|=1 with RMS-matched unit-norm directions.
+{verdict}on mean |Δ edema fraction| at |α|=1 with unit-norm matched random directions.
 
 | Metric | Probe | Random (mean) | Ratio |
 |--------|------:|--------------:|------:|

@@ -1,4 +1,4 @@
-"""Test-time augmentation (TTA) for uncertainty estimation."""
+"""Test-time augmentation (TTA) for validation predictions."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class FlipAugmentation:
     flip_x: bool
 
 
-# Standard 8-fold flip TTA used in Milestone 2.
+# Standard 8-fold flip TTA.
 STANDARD_TTA_AUGMENTATIONS: tuple[FlipAugmentation, ...] = (
     FlipAugmentation("identity", False, False, False),
     FlipAugmentation("flip_x", False, False, True),
@@ -116,6 +116,7 @@ def tta_sliding_window_inference(
         augmentations,
         desc="TTA augmentations",
         leave=False,
+        disable=len(augmentations) <= 1,
     ):
         augmented_image = apply_spatial_flip(
             image,

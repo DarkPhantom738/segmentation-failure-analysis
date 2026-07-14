@@ -81,12 +81,6 @@ class Trainer:
                 mean_dice = self.export_validation_artifacts(epoch)
                 print(f"Epoch {epoch}/{epochs} — val whole-tumor Dice: {mean_dice:.4f}")
 
-                if self._uncertainty_enabled() and self._uncertainty_export_during_validation():
-                    mean_tta_dice = self.export_uncertainty_artifacts(epoch)
-                    print(
-                        f"Epoch {epoch}/{epochs} — TTA whole-tumor Dice: {mean_tta_dice:.4f}"
-                    )
-
             if epoch % ckpt_every == 0 or epoch == epochs:
                 self._save_checkpoint(epoch)
 
@@ -136,6 +130,7 @@ class Trainer:
 
         patch_size = self.config["data"]["patch_size"]
         num_classes = self.config["model"]["num_classes"]
+        overlap = self._inference_overlap()
 
         for batch in tqdm(self.val_loader, desc=f"Validate epoch {epoch}", leave=False):
             case_id = batch["case_id"][0]
@@ -147,6 +142,7 @@ class Trainer:
                 image=image,
                 patch_size=patch_size,
                 num_classes=num_classes,
+                overlap=overlap,
                 device=self.device,
             )
 
@@ -188,14 +184,11 @@ class Trainer:
         return float(sum(dice_scores) / max(len(dice_scores), 1))
 
     @torch.no_grad()
-    def export_uncertainty_artifacts(self, epoch: int) -> float:
+    def export_tta_artifacts(self, epoch: int) -> float:
         """
-        Run TTA inference on validation cases and save uncertainty maps.
+        Run TTA inference and save predictions + entropy maps.
 
-        Saved per validation case:
-          - TTA-averaged softmax probability map
-          - TTA final predicted segmentation mask
-          - Voxelwise predictive entropy uncertainty map
+        Used only when rebuilding ``failure_metrics.csv`` (via ``analyze_failures.py``).
         """
         self.model.eval()
         metrics_rows: list[dict[str, str | float]] = []
@@ -209,10 +202,11 @@ class Trainer:
 
         patch_size = self.config["data"]["patch_size"]
         num_classes = self.config["model"]["num_classes"]
-        overlap = self._uncertainty_overlap()
+        overlap = self._inference_overlap()
+        inference_cfg = self.config.get("inference", self.config.get("uncertainty", {}))
 
         for batch in tqdm(
-            self.val_loader, desc=f"TTA uncertainty epoch {epoch}", leave=False
+            self.val_loader, desc=f"TTA export epoch {epoch}", leave=False
         ):
             case_id = batch["case_id"][0]
             image = batch["image"][0]
@@ -225,11 +219,13 @@ class Trainer:
                 num_classes=num_classes,
                 device=self.device,
                 overlap=overlap,
-                max_augmentations=self.config.get("uncertainty", {}).get("max_augmentations"),
+                max_augmentations=inference_cfg.get(
+                    "tta_augmentations",
+                    inference_cfg.get("max_augmentations"),
+                ),
             )
 
-            # Also run standard sliding-window once so embeddings exist even when
-            # --export-uncertainty is used without a prior Milestone 1 export.
+            # Also run standard sliding-window once so embeddings exist.
             _, embedding, _ = sliding_window_inference(
                 model=self.model,
                 image=image,
@@ -265,7 +261,7 @@ class Trainer:
                 embedding.cpu().numpy(),
                 epoch_embeddings / f"{case_id}_embedding.npy",
             )
-            prob_path, _ = self._resolve_milestone1_paths(epoch_tag, case_id)
+            prob_path, _ = self._resolve_non_tta_paths(epoch_tag, case_id)
 
             metrics_rows.append(
                 {
@@ -282,19 +278,12 @@ class Trainer:
             )
             dice_scores.append(dice)
 
-        self._write_uncertainty_metrics(metrics_rows, epoch)
+        self._write_tta_metrics(metrics_rows, epoch)
         return float(sum(dice_scores) / max(len(dice_scores), 1))
 
-    def _uncertainty_enabled(self) -> bool:
-        return bool(self.config.get("uncertainty", {}).get("enabled", False))
-
-    def _uncertainty_export_during_validation(self) -> bool:
-        return bool(
-            self.config.get("uncertainty", {}).get("export_during_validation", False)
-        )
-
-    def _uncertainty_overlap(self) -> float:
-        return float(self.config.get("uncertainty", {}).get("overlap", 0.5))
+    def _inference_overlap(self) -> float:
+        cfg = self.config.get("inference", self.config.get("uncertainty", {}))
+        return float(cfg.get("overlap", 0.25))
 
     def _existing_or_save_ground_truth(
         self,
@@ -307,8 +296,8 @@ class Trainer:
             return str(gt_path)
         return save_array(ground_truth, gt_path)
 
-    def _resolve_milestone1_paths(self, epoch_tag: str, case_id: str) -> tuple[str, str]:
-        """Return paths to Milestone 1 probability and embedding files if they exist."""
+    def _resolve_non_tta_paths(self, epoch_tag: str, case_id: str) -> tuple[str, str]:
+        """Return paths to non-TTA probability / embedding files if they exist."""
         prob_path = self.probabilities_dir / epoch_tag / f"{case_id}_probs.npy"
         emb_path = self.embeddings_dir / epoch_tag / f"{case_id}_embedding.npy"
         return str(prob_path) if prob_path.exists() else "", str(emb_path) if emb_path.exists() else ""
@@ -334,12 +323,11 @@ class Trainer:
                 writer.writeheader()
             writer.writerows(rows)
 
-        # Also write a per-epoch snapshot for convenience.
         epoch_metrics_path = self.output_dir / f"metrics_{epoch:03d}.csv"
         pd.DataFrame(rows).to_csv(epoch_metrics_path, index=False)
 
-    def _write_uncertainty_metrics(self, rows: list[dict], epoch: int) -> None:
-        """Append TTA uncertainty metrics to outputs/metrics_uncertainty.csv."""
+    def _write_tta_metrics(self, rows: list[dict], epoch: int) -> None:
+        """Append TTA metrics (input for analyze_failures.py)."""
         metrics_path = self.output_dir / "metrics_uncertainty.csv"
         file_exists = metrics_path.exists()
 

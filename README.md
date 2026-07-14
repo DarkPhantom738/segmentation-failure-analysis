@@ -58,13 +58,15 @@ Tissue fractions are compositional (edema, enhancing, necrosis sum within tumor)
 | Linear probing | Fold-safe Ridge on global-pooled activations | 375 val cases, all encoder/decoder layers |
 | Layer ablation | Replace layer activations with channel means; score vs matched sliding-window baseline | **375 / 375** cases |
 | Representation editing | A′ = A + αΔ, Δ from probe adjoint lift | 375 val cases, multiple properties |
-| Matched-random controls | Unit random directions, same \|α\| and RMS budget | 30 stratified cases per screen |
+| Matched-random controls | Unit-norm random directions, same \|α\| | 30 stratified cases per screen |
 
 **Model:** 3D U-Net, 10-hour BraTS training run, **epoch 5** checkpoint. **Intervention:** spatially constant per-channel perturbation broadcast across the activation map.
 
 Probe targets are derived from ground-truth anatomy or segmentation quality, whereas intervention effects are measured from the model's edited predicted segmentation.
 
 **Ablation baseline:** Primary results use a **matched sliding-window baseline** (same overlap and patch grid as the ablation forward pass; no TTA). Scoring against TTA validation predictions is reported as a robustness check.
+
+**Uncertainty baseline:** TTA uncertainty is reported as **predictive entropy** computed from the 8-fold TTA-averaged class probabilities. Do not describe this quantity as epistemic uncertainty or mutual information.
 
 ---
 
@@ -166,6 +168,34 @@ This is a mechanistic readout-versus-control analysis, not a clinical correction
 
 ---
 
+## Reporting guardrails
+
+Use these terms:
+
+- **Predictive entropy**, **TTA predictive entropy**, or **case-level uncertainty features** for the entropy maps derived from averaged TTA probabilities.
+- **Matched sliding-window baseline** for ablation scoring: same patch grid and overlap as the ablation forward pass, no TTA.
+- **Functional dependence on intact spatial activations** for whole-layer ablation findings.
+- **Weak semantic steering** for the decoder1 edema result.
+- **Decodable but not probe-specific downstream control** for the decoder2 whole-tumor voxel-count result.
+
+Avoid these claims:
+
+- Do not call the entropy maps **epistemic uncertainty** or **mutual information** unless a separate MI analysis is added.
+- Do not claim the ablation identifies a single probe direction as causally necessary. Whole-layer ablation is destructive and property-agnostic.
+- Do not claim the method repairs segmentations or improves Dice; editing effects are small and Dice changes are negligible.
+- Do not mix ablation baselines. The primary ablation numbers are from the matched non-TTA baseline; TTA scoring is only a robustness check.
+- Do not retrain because of inference overlap. Overlap is an inference/export setting; standardize reporting to overlap 0.25 for this study.
+
+Recommended paper wording:
+
+> We compute voxelwise predictive entropy from the 8-fold TTA-averaged class probabilities and aggregate it into case-level uncertainty features.
+
+> All intervention analyses use matched sliding-window inference with overlap 0.25 for both baseline and perturbed predictions.
+
+> Whole-layer mean ablation measures functional dependence on intact spatial activations, not selective causal control of a probe-derived semantic direction.
+
+---
+
 ## Limitations
 
 - Single checkpoint and additive, globally broadcast interventions.
@@ -173,6 +203,12 @@ This is a mechanistic readout-versus-control analysis, not a clinical correction
 - Random-control screens are small exploratory checks, not powered hypothesis tests.
 - Whole-layer ablation is destructive and not property-specific; it measures functional dependence on intact spatial activations, not probe-direction necessity.
 - Checkpoints, embeddings, and raw predictions are not stored in git.
+
+---
+
+## TODO
+
+- **Unify probe-screen `n_random`:** edema screen uses 3 random directions; volume screen defaults to 5. Not a correctness bug (each screen is self-contained), but re-run both at the same `n` for cleaner cross-property comparison / reviewer neatness, then update reported ratios if they move.
 
 ---
 
@@ -235,8 +271,7 @@ python analyze_layer_interventions.py \
   --data-root /path/to/BraTS2021_Training_Data \
   --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
   --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
-  --output-dir outputs_10hour/layer_interventions \
-  --save-predictions
+  --output-dir outputs_10hour/layer_interventions
 
 python analyze_layer_interventions.py \
   --config configs/ten_hour.yaml \
@@ -255,17 +290,17 @@ Precomputed summaries: `outputs_10hour/representation_editing/`, `outputs_10hour
 
 ```text
 configs/ten_hour.yaml
-analyze_layer_holdout_recoverability.py   # Probing
-learn_semantic_directions.py              # Probe → edit directions
-analyze_representation_editing.py         # Full editing cohort
+train.py                                # Train / export validation preds
+analyze_failures.py                     # Build failure_metrics.csv (already committed)
+export_layer_embeddings.py              # Layer activation export
+analyze_layer_holdout_recoverability.py # Probing
+learn_semantic_directions.py            # Probe → edit directions
+analyze_representation_editing.py       # Full editing cohort
 analyze_edema_probe_screen.py           # Edema vs random (30 cases)
-analyze_volume_probe_screen.py            # Whole-tumor voxel count vs random (30 cases)
-analyze_layer_interventions.py            # Whole-layer ablation + matched-baseline rescore
-export_layer_embeddings.py                # Activation export (local)
-outputs_10hour/                           # Curated CSVs, figures, directions
-outputs_10hour/layer_interventions/matched_baseline/  # Primary ablation summaries
-docs/previous_work/                       # Archived uncertainty study
-docs/manuscript/                          # Manuscript-facing notes
+analyze_volume_probe_screen.py          # Volume vs random (30 cases)
+analyze_layer_interventions.py          # Mean ablation (+ matched baseline)
+outputs_10hour/                         # Curated CSVs, figures, directions
+docs/manuscript/environment_and_split.md # Env + split provenance
 ```
 
 ---
@@ -275,11 +310,3 @@ docs/manuscript/                          # Manuscript-facing notes
 Code is released for research. BraTS 2021 use is subject to [Synapse terms](https://www.synapse.org/#!Synapse:syn27046444). No patient identifiers are included in committed artifacts. BraTS: Menze et al., CVPR 2015; Bakas et al., 2017–2021.
 
 No `LICENSE` file is present in this repository; license terms have not been finalized.
-
----
-
-## Project origins
-
-This repository began as an investigation of whether bottleneck embeddings complement TTA uncertainty for segmentation-quality estimation without ground truth. Those experiments motivated the present mechanistic question: *what do internal representations encode, and can they be manipulated?*
-
-The earlier uncertainty-and-geometry analysis is archived at [`docs/previous_work/uncertainty_quality_estimation.md`](docs/previous_work/uncertainty_quality_estimation.md).

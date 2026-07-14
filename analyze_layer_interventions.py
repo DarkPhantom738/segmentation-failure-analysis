@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Layer ablation interventions for causal representation probing."""
+"""Layer mean-ablation study (functional dependence on intact activations)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import torch
 import yaml
 
 from src.analysis.layer_interventions import (
-    backfill_rho_only,
     recompute_ablation_with_matched_baseline,
     run_layer_ablations,
 )
@@ -20,8 +19,9 @@ from src.utils.io import ensure_dir
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Part 1: ablate U-Net layer activations (zero/mean/noise) and measure "
-            "segmentation quantity degradation."
+            "Mean-ablate each U-Net layer and measure Dice / anatomy degradation. "
+            "Primary manuscript numbers use --recompute-matched-baseline after a "
+            "full ablation run with cached predictions."
         )
     )
     parser.add_argument("--config", type=Path, default=Path("configs/ten_hour.yaml"))
@@ -29,22 +29,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--failure-table", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--overlap", type=float, default=None)
-    parser.add_argument("--max-cases", type=int, default=None)
+    parser.add_argument("--max-cases", type=int, default=None, help="Debug: limit cases.")
     parser.add_argument(
         "--data-root",
         type=Path,
         default=None,
-        help="Override config data.root (for local BraTS path).",
-    )
-    parser.add_argument(
-        "--save-predictions",
-        action="store_true",
-        help="Cache ablated prediction masks for resume.",
-    )
-    parser.add_argument(
-        "--rho-backfill-only",
-        action="store_true",
-        help="Only compute rho for cached predictions (no mask overwrite, no restart).",
+        help="Override config data.root (local BraTS path).",
     )
     parser.add_argument(
         "--recompute-matched-baseline",
@@ -77,22 +67,6 @@ def main() -> None:
         device = torch.device("cpu")
     print(f"Using device: {device}")
 
-    if args.rho_backfill_only:
-        rho_df = backfill_rho_only(
-            config=config,
-            checkpoint_path=args.checkpoint,
-            failure_table_path=args.failure_table,
-            output_dir=output_dir,
-            device=device,
-            overlap=args.overlap,
-            max_cases=args.max_cases,
-        )
-        print(f"Backfilled rho to {output_dir / 'rho_log.csv'} ({len(rho_df)} rows)")
-        strength = output_dir / "intervention_strength_summary.csv"
-        if strength.exists():
-            print(f"  strength summary: {strength}")
-        return
-
     if args.recompute_matched_baseline:
         results = recompute_ablation_with_matched_baseline(
             config=config,
@@ -117,7 +91,6 @@ def main() -> None:
         device=device,
         overlap=args.overlap,
         max_cases=args.max_cases,
-        save_predictions=args.save_predictions,
     )
     summary = results["summary"]
     print(f"Wrote ablation study to {output_dir}")

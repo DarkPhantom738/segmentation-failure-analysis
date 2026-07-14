@@ -19,13 +19,12 @@ def parse_args() -> argparse.Namespace:
             "activation tensor space via the GAP adjoint."
         )
     )
-    parser.add_argument("--config", type=Path, default=Path("configs/five_epoch_533.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/ten_hour.yaml"))
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--layer-index", type=Path, required=True)
     parser.add_argument("--failure-table", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--min-r2", type=float, default=0.15)
-    parser.add_argument("--include-auxiliary", action="store_true")
     return parser.parse_args()
 
 
@@ -42,7 +41,6 @@ def main() -> None:
         checkpoint_path=args.checkpoint,
         config=config,
         min_r2=args.min_r2,
-        include_auxiliary=args.include_auxiliary,
     )
     print(f"Wrote {len(catalog)} directions to {args.output_dir}")
     print(f"  catalog: {args.output_dir / 'semantic_directions_catalog.csv'}")

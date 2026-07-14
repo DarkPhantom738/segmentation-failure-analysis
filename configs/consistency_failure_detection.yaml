@@ -1,0 +1,38 @@
+# Representation–Output Consistency Score (failure detection feasibility)
+
+seed: 42
+outer_folds: 5
+inner_folds: 4
+n_bootstrap: 2000
+
+paths:
+  layer_index: "outputs_10hour/layer_embeddings/layer_embedding_index.csv"
+  failure_table: "outputs_10hour/failure_tables/failure_metrics.csv"
+  output_dir: "outputs_consistency_failure_detection"
+
+targets:
+  # anatomical properties for inconsistency (rep probe vs pred-mask measurement)
+  inconsistency:
+    - log_wt_volume
+    - gt_edema_frac
+    - gt_enhancing_frac
+    - gt_necrosis_frac
+    - gt_compactness
+  # quality probes used as representation-only features / baselines
+  quality_probes:
+    - dice
+    - boundary_error_fraction
+
+layers:
+  - encoder1
+  - encoder2
+  - encoder3
+  - encoder4
+  - bottleneck
+  - decoder4
+  - decoder3
+  - decoder2
+  - decoder1
+
+ridge_alphas: [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0]
+logistic_C: [0.01, 0.1, 1.0, 10.0]

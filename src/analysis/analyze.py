@@ -1,4 +1,4 @@
-"""Per-case failure and uncertainty-error analysis."""
+"""Per-case failure labels and entropy–error metrics for the validation table."""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def analyze_cases_from_metrics(
     low_entropy_percentile: float = 25.0,
 ) -> pd.DataFrame:
     """
-    Analyze all cases listed in a Milestone 2 metrics_uncertainty.csv file.
+    Analyze all cases listed in a TTA metrics CSV (from ``train.py --export-tta``).
 
     If multiple epochs are present, the latest row per case_id is used.
     """

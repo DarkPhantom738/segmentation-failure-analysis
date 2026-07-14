@@ -1,0 +1,39 @@
+# Fast classifier-inverted edema repair (train-partition 12/6/6 only)
+
+seed: 42
+feasibility_seed: 20260711
+
+data:
+  root: "data/BraTS2021_Training"
+  val_fraction: 0.30
+  target_spacing: [2.0, 2.0, 2.0]
+  percentile_clip: [1.0, 99.0]
+  patch_size: [64, 64, 64]
+  modalities: ["t1", "t1ce", "t2", "flair"]
+  cache_dir: "outputs_10hour/cache"
+
+model:
+  in_channels: 4
+  num_classes: 4
+  base_features: 32
+  embedding_dim: 128
+
+checkpoint: "outputs_10hour/checkpoints/checkpoint_epoch_005.pt"
+probe_direction: "outputs_10hour/semantic_directions/directions/decoder1__gt_edema_frac.npz"
+case_split: "outputs_fast_spatial_repair/case_split.json"
+
+training:
+  max_steps: 300
+  patience: 50
+  eval_every: 25
+  lr: 0.01
+  lambda_seg: 0.5
+  lambda_sparse: 0.01
+  weight_cap: 50.0
+  error_patch_fraction: 0.5
+
+inference:
+  overlap: 0.25
+  abstain_threshold: 0.35
+
+output_dir: "outputs_fast_classifier_inverted_repair"

@@ -1,0 +1,52 @@
+{
+  "mean_oracle_gain": 0.01918351057515198,
+  "median_oracle_gain": 0.012284009084816527,
+  "max_oracle_gain": 0.07623163316952919,
+  "n_gain_ge_0_02": 1,
+  "n_gain_ge_0_05": 1,
+  "n_cases": 6,
+  "per_case": [
+    {
+      "case_id": "BraTS2021_00165",
+      "baseline_edema_dice": 0.9424720831729361,
+      "best_edema_dice": 0.9424720831729361,
+      "best_alpha": 0.0,
+      "oracle_gain": 0.0
+    },
+    {
+      "case_id": "BraTS2021_00539",
+      "baseline_edema_dice": 0.8698721363879396,
+      "best_edema_dice": 0.8813623943573227,
+      "best_alpha": -2.0,
+      "oracle_gain": 0.011490257969383078
+    },
+    {
+      "case_id": "BraTS2021_01180",
+      "baseline_edema_dice": 0.8194880578552577,
+      "best_edema_dice": 0.8325658180555077,
+      "best_alpha": -3.0,
+      "oracle_gain": 0.013077760200249977
+    },
+    {
+      "case_id": "BraTS2021_01245",
+      "baseline_edema_dice": 0.6960614907944372,
+      "best_edema_dice": 0.7093330457757538,
+      "best_alpha": -2.0,
+      "oracle_gain": 0.013271554981316602
+    },
+    {
+      "case_id": "BraTS2021_01464",
+      "baseline_edema_dice": 0.6677145551718521,
+      "best_edema_dice": 0.7439461883413813,
+      "best_alpha": 6.0,
+      "oracle_gain": 0.07623163316952919
+    },
+    {
+      "case_id": "BraTS2021_01552",
+      "baseline_edema_dice": 0.9315488129536007,
+      "best_edema_dice": 0.9325786700840337,
+      "best_alpha": -1.0,
+      "oracle_gain": 0.0010298571304330206
+    }
+  ]
+}

@@ -55,10 +55,10 @@ from sklearn.model_selection import KFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.analysis.baselines import choose_cv_folds
-from src.analysis.layer_analysis import (
+from src.analysis.layer_io import (
     ANATOMY_TARGET_SPECS,
     build_anatomy_table,
+    choose_cv_folds,
     load_layer_index,
     load_layer_matrix,
 )

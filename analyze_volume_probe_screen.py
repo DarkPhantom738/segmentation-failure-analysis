@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal screening: decoder2 tumor-volume probe vs RMS-matched random controls (30 cases)."""
+"""Minimal screening: decoder2 tumor-volume probe vs unit-norm random controls (30 cases)."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from src.utils.io import ensure_dir
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Screen whether decoder2 tumor-volume probe edits beat 20 random directions "
-            "on 30 Dice-stratified validation cases."
+            "Screen whether decoder2 tumor-volume probe edits beat 5 random directions "
+            "on 30 Dice-stratified validation cases (override with --n-random)."
         )
     )
     parser.add_argument("--config", type=Path, default=Path("configs/ten_hour.yaml"))

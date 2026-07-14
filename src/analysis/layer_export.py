@@ -55,7 +55,7 @@ def export_layer_embeddings(
     num_classes = config["model"]["num_classes"]
     data_cfg = config["data"]
     if overlap is None:
-        overlap = float(config.get("uncertainty", {}).get("overlap", 0.25))
+        overlap = float(config.get("inference", config.get("uncertainty", {})).get("overlap", 0.25))
 
     index_rows: list[dict[str, str | float]] = []
 
