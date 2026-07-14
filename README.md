@@ -1,234 +1,214 @@
-# Decodable Is Not Controllable
-## Probing and Editing Anatomical Representations in a 3D U-Net
+# Anatomical Representation–Output Consistency Improves Confidence-Based Failure Triage in 3D Brain Tumor Segmentation
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![Dataset: BraTS](https://img.shields.io/badge/dataset-BraTS%202021-green.svg)](https://www.synapse.org/#!Synapse:syn27046444)
 
-**Thesis:** Late U-Net decoder representations contain linearly accessible anatomical information, but linear recoverability does not guarantee selective causal control. Probe-aligned editing weakly steers edema composition beyond matched random perturbations, whereas a highly predictive whole-tumor voxel-count direction changes its analytical readout without producing probe-specific downstream volume control.
+This project studies the internal representations of a 3D U-Net for BraTS brain-tumor segmentation. Anatomical properties can often be decoded from those activations, but probe-derived edit directions did not consistently control or repair the final mask. What did help was measuring when the anatomy implied by a representation disagrees with the anatomy of the predicted mask, then combining those disagreements with ordinary inference-time confidence.
+
+In one sentence: this project helps a brain-tumor segmentation model flag which of its predictions are most likely to need human review.
 
 ---
 
-## Thirty-second overview
+## Main result
 
-This repository documents a mechanistic case study of a trained 3D U-Net on BraTS 2021 (375 validation cases). We ask whether properties that are linearly decodable from internal activations can also be selectively manipulated by editing those activations along probe-derived directions.
+On 375 BraTS 2021 validation cases, nested cross-validation (5 outer / 4 inner folds, seed 42) with 5000 paired bootstrap replicates.
 
-The answer is mixed—and that asymmetry is the point. Edema fraction at decoder1 is weakly steerable beyond random controls. Whole-tumor voxel count at decoder2 is strongly decodable (R² = 0.822) yet not steerable in a probe-specific way: matched random perturbations change predicted whole-tumor voxel count as much as the probe direction does.
+**Detecting the lowest-quality 20% of segmentations** (by mean foreground Dice):
 
----
-
-## Central comparison
-
-| Result | Edema at decoder1 | Whole-tumor voxel count at decoder2 |
+| Method | AUPRC | Capture at 20% review |
 |---|---:|---:|
-| OOF Ridge probe R² | 0.596 | 0.822 |
-| Probe edit effect | 2.08 percentage points | 3.82 voxels |
-| Matched-random effect | 0.88 percentage points | 4.45 voxels |
-| Probe/random ratio | 2.36× | 0.86× |
-| Interpretation | Weak semantic steering | Decodable, not a downstream control axis |
+| Confidence only | 0.805 | 71.4% |
+| Confidence + morphology | 0.851 | 75.3% |
+| Confidence + pooled representations | 0.854 | 74.0% |
+| Confidence + representation–output consistency | **0.895** | **79.2%** |
 
-*Probe edit effects in the table come from the 30-case matched-random screens (`edema_probe_screen_summary.csv`, `volume_probe_screen_summary.csv`). Full-cohort editing means are in `editing_summary.csv` (375 cases): edema |Δ| = 2.03 pp at α = +1 and 2.05 pp at α = −1; 4.08 pp at α = +2 and 4.17 pp at α = −2.*
+- AUPRC gain vs confidence: **+0.090** (paired bootstrap 95% CI **[0.031, 0.152]**).
+- Confidence + consistency beat confidence in about **99.8%** of bootstrap samples.
+- For mean foreground Dice &lt; 0.70, AUPRC improved from **0.770** to **0.887**.
+- Benefit for edema-specific failure labels was limited (morphology-augmented confidence often did better there).
 
----
+These are research quality-control metrics—not a claim of clinical benefit or deployment readiness.
 
-## Research question
-
-**Does linearly decodable anatomical information in a segmentation network imply that the same representation can be selectively controlled?**
-
-We separate three forms of evidence often conflated in representation analysis:
-
-1. **Recoverability** — Can a property be read out from activations?
-2. **Functional dependence** — Does disrupting a layer damage segmentation?
-3. **Controllability** — Can a targeted intervention change the corresponding output property?
+Canonical numbers: `outputs_confidence_consistency_triage_20260712_030902/aggregate_metrics.csv` and `bootstrap_comparisons.csv`. Broader baseline tables: `outputs_method_validation/`.
 
 ---
 
-## Why decodability ≠ controllability
+## What representation–output consistency means
 
-A Ridge probe identifies a direction correlated with a property in representation space. Editing along that direction tests whether the network *uses* that axis for downstream control. These need not coincide: correlations can reflect encoding without providing an intervention handle the decoder exploits.
+For each anatomical property (for example enhancing-tumor fraction, edema fraction, or whole-tumor volume):
 
-Tissue fractions are compositional (edema, enhancing, necrosis sum within tumor), so off-target coupling is expected even when on-target movement is real. Whole-layer mean ablation tests **functional dependence on intact spatial activations**; it does **not** establish that any single probe direction is causally necessary.
+1. Fit a Ridge probe on a hidden layer (using ground truth only inside the training fold).
+2. Read the same property from the **predicted** segmentation mask.
+3. Record how far the two disagree.
+4. Combine those gaps with confidence features (TTA max-probability, entropy, margin summaries, and related case-level statistics).
+5. Score case-level failure risk with a logistic model under nested CV.
 
----
+Gap features (conceptual; code column names may differ):
 
-## Study design
+```text
+signed_gap   = representation_estimate - predicted_mask_measurement
+absolute_gap = abs(representation_estimate - predicted_mask_measurement)
+relative_gap = abs(representation_estimate - predicted_mask_measurement)
+               / (abs(predicted_mask_measurement) + epsilon)
+```
 
-| Stage | Method | Scale |
-|---|---|---|
-| Linear probing | Fold-safe Ridge on global-pooled activations | 375 val cases, all encoder/decoder layers |
-| Layer ablation | Replace layer activations with channel means; score vs matched sliding-window baseline | **375 / 375** cases |
-| Representation editing | A′ = A + αΔ, Δ from probe adjoint lift | 375 val cases, multiple properties |
-| Matched-random controls | Unit-norm random directions, same \|α\| | 30 stratified cases per screen |
+**Inference-time rule:** the triage score does not take ground-truth masks or GT-linked error maps as inputs. Ground truth is used only to fit probes inside training folds, define failure labels, and evaluate held-out performance.
 
-**Model:** 3D U-Net, 10-hour BraTS training run, **epoch 5** checkpoint. **Intervention:** spatially constant per-channel perturbation broadcast across the activation map.
-
-Probe targets are derived from ground-truth anatomy or segmentation quality, whereas intervention effects are measured from the model's edited predicted segmentation.
-
-**Ablation baseline:** Primary results use a **matched sliding-window baseline** (same overlap and patch grid as the ablation forward pass; no TTA). Scoring against TTA validation predictions is reported as a robustness check.
-
-**Uncertainty baseline:** TTA uncertainty is reported as **predictive entropy** computed from the 8-fold TTA-averaged class probabilities. Do not describe this quantity as epistemic uncertainty or mutual information.
+In prose, refer to features as representation–output enhancing-fraction gaps, edema-fraction gaps, whole-tumor-volume gaps, and so on—even when code columns still use historical names.
 
 ---
 
-## Main findings
+## Study overview
 
-### Probing (best layer per target, 5-fold OOF R² on 375 cases)
+| Item | Setting |
+|---|---|
+| Dataset | BraTS 2021 |
+| Train / analysis split | 876 train / **375** internal validation |
+| Inputs | T1, T1ce, T2, FLAIR |
+| Model | Four-class 3D U-Net |
+| Checkpoint | Epoch 5 from the ~10-hour training config (`configs/ten_hour.yaml`) |
+| Stages analyzed | encoder1–4, bottleneck, decoder4–1 (nine stages) |
 
-| Property | Layer | R² |
+Four connected analyses on the same frozen model:
+
+1. **Layer-wise linear probing** — full-cohort out-of-fold Ridge recoverability.
+2. **Spatial mean ablation** — replace each layer map with its channel means; score Dice drop vs a matched sliding-window baseline.
+3. **Probe-aligned editing** — add scaled probe directions; compare to matched random directions (exploratory **30-case** screens, plus full-cohort edit summaries).
+4. **Confidence-augmented failure triage** — consistency gaps + confidence under leakage-safe nested CV (**375** cases).
+
+Train/val provenance: `docs/manuscript/environment_and_split.md`.
+
+---
+
+## Mechanistic companion findings
+
+Decode ≠ control is still in the paper, but it is no longer the headline endpoint.
+
+### Full-cohort probe R² (375 cases, 5-fold OOF)
+
+Source: `outputs_10hour/layer_analysis/layer_recoverability.csv`
+
+| Property | Best layer | R² |
 |---|---|---:|
-| Whole-tumor voxel count | decoder2 | 0.822 |
-| Enhancing fraction | decoder1 | 0.647 |
+| Whole-tumor volume (voxel count) | decoder2 | 0.822 |
+| Enhancing-tumor fraction | decoder1 | 0.647 |
 | Edema fraction | decoder1 | 0.596 |
 | Dice | decoder1 | 0.565 |
-| Necrosis fraction | decoder1 | 0.525 |
+| Necrotic / nonenhancing fraction | decoder1 | 0.525 |
 | Boundary complexity | decoder2 | 0.430 |
 | Boundary error | decoder1 | 0.415 |
 
-*Source: `outputs_10hour/layer_analysis/layer_recoverability.csv`*
+The locked-holdout heatmap below uses a **separate** selection/test split, so its R² values are **not** the same estimates as this table.
 
-### Editing (375 cases)
+### Editing (screens + full cohort)
 
-- Decoder1 tissue-fraction edits were **monotonic but small** (edema |Δ| = 2.03 pp at α = +1 and 2.05 pp at α = −1; 4.08 pp at α = +2 and 4.17 pp at α = −2; `editing_summary.csv`).
-- Edits caused **substantial off-target changes** in other tissue properties and whole-tumor voxel count.
-- **Dice changes were negligible**; no evidence of segmentation repair.
+Matched-random screens (n = 30 each; exploratory, not powered tests):
 
-### Matched-random screens (small; not significance tests)
+- Edema @ decoder1: probe / random absolute response ratio **2.36** (weak probe-specific steering).
+- Whole-tumor volume @ decoder2: probe / random ratio **0.86**—strongly decodable, but the probe direction did not beat random for changing measured volume. Analytical Ridge movement (+α/−α opposite sign) was far more consistent than actual segmentation volume flips.
 
-**Edema (decoder1):** 30 cases, 3 random directions, |α| = 1. Probe mean |Δedema| = 0.02079 vs random 0.00880 (ratio 2.36; `edema_probe_screen_summary.csv`). Weak target-related steering beyond a generic same-sized perturbation, but not selective control.
+Full-cohort edema edits were small and monotonic; Dice barely moved. Editing is not a repair method here.
 
-**Whole-tumor voxel count (decoder2):** 30 cases, 5 random directions, |α| = 1. Probe mean absolute change = 3.82 voxels vs random 4.45 (ratio 0.86; 47.3rd percentile; `volume_probe_screen_summary.csv`). +α/−α flipped analytical Ridge predictions in 100% of cases (30/30) but predicted whole-tumor voxel count in 56.7% of cases (17/30).
+### Mean ablation (375 cases, matched baseline)
 
-### Layer ablation (375 cases; matched sliding-window baseline)
+Dice degradation under spatial mean replacement:
 
-Mean ablation replaces each layer’s activation map with its per-channel spatial mean. Primary scoring uses a matched non-TTA sliding-window baseline (`matched_baseline/`).
+| Layer | Mean Dice degradation |
+|---|---:|
+| decoder1 | 0.889 |
+| encoder1 | 0.498 |
+| decoder2 | 0.399 |
+| bottleneck | ≈ 0 |
 
-| Rank | Layer | Mean Dice degradation |
-|------|-------|----------------------:|
-| 1 | decoder1 | 0.889 |
-| 2 | encoder1 | 0.498 |
-| 3 | decoder2 | 0.399 |
-| 4 | encoder2 | 0.273 |
-| 5 | decoder3 | 0.055 |
-| 6 | encoder3 | 0.027 |
-| 7 | encoder4 | 0.001 |
-| 8 | bottleneck | −0.000 |
-| 9 | decoder4 | −0.002 |
+Spatial organization at the bottleneck was relatively insensitive to mean replacement under this intervention. That does **not** mean the bottleneck is unnecessary for the network as a whole.
 
-*Source: `outputs_10hour/layer_interventions/matched_baseline/baseline_comparison.csv` (matched_baseline_dice_degradation).*
-
-**Interpretation:** Late decoder and early encoder stages show strong **functional dependence on intact spatial activations** for Dice. The bottleneck shows essentially no Dice degradation under mean ablation despite strong location recoverability in probing.
-
-**Robustness (TTA baseline):** Rescoring the same ablated masks against TTA validation predictions yields the **identical layer ranking** (Spearman ρ = 1.000). Absolute Dice degradations differ by a uniform +0.006 (matched − TTA), reflecting a slightly higher matched baseline Dice (0.889 vs 0.883). Top-3 layers are unchanged: decoder1, encoder1, decoder2 (`baseline_comparison.md`).
+Source: `outputs_10hour/layer_interventions/matched_baseline/baseline_comparison.csv`.
 
 ---
 
-## Interpretation
+## Why this matters
 
-The strongest whole-tumor voxel-count probe in this study is among the weakest editors. Predictive probe directions may reflect naturally occurring representation correlations rather than axes the downstream network treats as control handles. Edema at decoder1 shows the opposite partial pattern: modest semantic steering beyond random, coupled across tissue properties.
+Internal maps can encode anatomy. That does not automatically give a handle for reliable control or automatic correction. The same encoding can still be useful for monitoring: when the representation’s anatomical story disagrees with the mask the network emits, that mismatch adds information beyond confidence for spotting **overall** bad cases that may need review.
 
-Ablation further separates recoverability from functional dependence: bottleneck location is highly decodable, yet mean ablation of the bottleneck barely changes Dice, whereas decoder1/decoder2 show strong functional dependence on intact spatial activations.
-
-This is a mechanistic readout-versus-control analysis, not a clinical correction method.
+Claims we do **not** make: first-of-its-kind method; clinical correction; automatic repair; external generalization; universal behavior across architectures.
 
 ---
 
-## Key figures
+## Figures
 
-**Layer recoverability (locked holdout R²)**
+**1. Layer recoverability (locked holdout)** — different split than the full-cohort table above.
 
-![Layer recoverability heatmap](outputs_10hour/layer_holdout_recoverability/figures/heatmap_locked_r2.png)
+![Locked-holdout recoverability heatmap](outputs_10hour/layer_holdout_recoverability/figures/heatmap_locked_r2.png)
 
-*This heatmap uses a separate 187-case selection / 188-case locked-test split (`layer_holdout_recoverability/`). R² values therefore differ from the full-cohort 5-fold OOF probing table above.*
+**2. Whole-tumor volume: analytical probe response vs actual mask volume** (30-case screen).
 
-**Editing dose–response**
+![Analytical vs actual volume](outputs_10hour/volume_probe_screen/figures/analytical_vs_actual_volume.png)
 
-![Editing dose response](outputs_10hour/representation_editing/figures/dose_response.png)
+**3. Failure-triage precision–recall** (canonical nested run).
 
-**Edema probe vs random (30-case screen)**
+![Precision–recall curves](outputs_confidence_consistency_triage_20260712_030902/figures/precision_recall_curves.png)
 
-![Edema probe vs random](outputs_10hour/edema_probe_screen/figures/abs_edema_delta_probe_vs_random.png)
+**4. Failure capture vs review budget.**
 
-**Whole-tumor voxel count: analytical probe change vs actual segmentation change**
-
-![Whole-tumor voxel count analytical vs actual](outputs_10hour/volume_probe_screen/figures/analytical_vs_actual_volume.png)
-
-**Layer ablation: mean Dice degradation by layer (matched baseline)**
-
-![Ablation Dice degradation heatmap](outputs_10hour/layer_interventions/matched_baseline/figures/heatmap_mean_degradation.png)
+![Failure capture curves](outputs_method_validation/figures/failure_capture_curves.png)
 
 ---
 
-## What this study establishes
+## Repository structure
 
-- On this U-Net, late decoder layers encode anatomical properties with substantial linear recoverability.
-- Probe-aligned additive edits can weakly steer some tissue-composition outputs.
-- A highly predictive whole-tumor voxel-count direction does not provide probe-specific downstream volume control in this setting.
-- Recoverability, functional dependence on intact spatial activations (ablation), and selective controllability are distinct and can diverge.
-- Ablation layer rankings are stable under matched vs TTA baselines (Spearman ρ = 1.000).
+```text
+configs/
+  ten_hour.yaml
+  confidence_consistency_triage.yaml
+  method_validation.yaml
+  consistency_failure_detection.yaml
+  layer_aware_latent_risk.yaml
+src/
+  data/                 # BraTS loading / preprocessing
+  models/               # 3D U-Net (+ exploratory repair modules)
+  analysis/             # probing, editing, consistency, triage
+outputs_10hour/
+  layer_analysis/
+  layer_holdout_recoverability/
+  layer_interventions/
+  representation_editing/
+  edema_probe_screen/
+  volume_probe_screen/
+  failure_tables/
+outputs_confidence_consistency_triage/
+outputs_confidence_consistency_triage_20260712_030902/   # preferred canonical triage
+outputs_method_validation/
+outputs_layer_aware_latent_risk/                         # confidence CSV
+outputs_consistency_failure_detection/
+docs/
+  manuscript/environment_and_split.md
+  reporting_notes.md
+```
 
----
-
-## Reporting guardrails
-
-Use these terms:
-
-- **Predictive entropy**, **TTA predictive entropy**, or **case-level uncertainty features** for the entropy maps derived from averaged TTA probabilities.
-- **Matched sliding-window baseline** for ablation scoring: same patch grid and overlap as the ablation forward pass, no TTA.
-- **Functional dependence on intact spatial activations** for whole-layer ablation findings.
-- **Weak semantic steering** for the decoder1 edema result.
-- **Decodable but not probe-specific downstream control** for the decoder2 whole-tumor voxel-count result.
-
-Avoid these claims:
-
-- Do not call the entropy maps **epistemic uncertainty** or **mutual information** unless a separate MI analysis is added.
-- Do not claim the ablation identifies a single probe direction as causally necessary. Whole-layer ablation is destructive and property-agnostic.
-- Do not claim the method repairs segmentations or improves Dice; editing effects are small and Dice changes are negligible.
-- Do not mix ablation baselines. The primary ablation numbers are from the matched non-TTA baseline; TTA scoring is only a robustness check.
-- Do not retrain because of inference overlap. Overlap is an inference/export setting; standardize reporting to overlap 0.25 for this study.
-
-Recommended paper wording:
-
-> We compute voxelwise predictive entropy from the 8-fold TTA-averaged class probabilities and aggregate it into case-level uncertainty features.
-
-> All intervention analyses use matched sliding-window inference with overlap 0.25 for both baseline and perturbed predictions.
-
-> Whole-layer mean ablation measures functional dependence on intact spatial activations, not selective causal control of a probe-derived semantic direction.
-
----
-
-## Limitations
-
-- Single checkpoint and additive, globally broadcast interventions.
-- Tissue fractions are compositional and partially coupled.
-- Random-control screens are small exploratory checks, not powered hypothesis tests.
-- Whole-layer ablation is destructive and not property-specific; it measures functional dependence on intact spatial activations, not probe-direction necessity.
-- Checkpoints, embeddings, and raw predictions are not stored in git.
-
----
-
-## TODO
-
-- **Unify probe-screen `n_random`:** edema screen uses 3 random directions; volume screen defaults to 5. Not a correctness bug (each screen is self-contained), but re-run both at the same `n` for cleaner cross-property comparison / reviewer neatness, then update reported ratios if they move.
+Large artifacts (raw BraTS volumes, checkpoints, probability maps, layer `.npy` embeddings) are **not** stored in Git.
 
 ---
 
 ## Reproduction
 
-**Prerequisites:** BraTS 2021 data, Python environment (`requirements.txt`), trained checkpoint at `outputs_10hour/checkpoints/checkpoint_latest.pt` (epoch 5; not in git).
+### 1. Environment
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# Set data.root in configs/ten_hour.yaml
+# Point data.root at your local BraTS tree in configs/ten_hour.yaml
 ```
 
-**Inspect committed results** (no GPU required):
+### 2. Data and checkpoint
 
-```bash
-# Tables and reports under outputs_10hour/
-```
+You need locally:
 
-**Re-run analysis** (requires local checkpoint + layer embeddings from `export_layer_embeddings.py`):
+- BraTS 2021 training data;
+- epoch-5 / latest checkpoint under `outputs_10hour/checkpoints/` (not in Git);
+- `outputs_10hour/failure_tables/failure_metrics.csv` (committed) for case lists and paths.
+
+### 3. Representation extraction and probing
 
 ```bash
 python export_layer_embeddings.py \
@@ -247,7 +227,11 @@ python learn_semantic_directions.py \
   --layer-index outputs_10hour/layer_embeddings/layer_embedding_index.csv \
   --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
   --output-dir outputs_10hour/semantic_directions
+```
 
+### 4. Ablation and editing
+
+```bash
 python analyze_representation_editing.py \
   --config configs/ten_hour.yaml \
   --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
@@ -282,31 +266,81 @@ python analyze_layer_interventions.py \
   --recompute-matched-baseline
 ```
 
-Precomputed summaries: `outputs_10hour/representation_editing/`, `outputs_10hour/edema_probe_screen/`, `outputs_10hour/volume_probe_screen/`, `outputs_10hour/layer_interventions/matched_baseline/`.
+### 5. Confidence-feature generation
 
----
+Committed confidence table: `outputs_layer_aware_latent_risk/case_level_confidence_features.csv`.
 
-## Repository structure
+To regenerate (needs checkpoint + local volumes; GPU/CPU heavy):
 
-```text
-configs/ten_hour.yaml
-train.py                                # Train / export validation preds
-analyze_failures.py                     # Build failure_metrics.csv (already committed)
-export_layer_embeddings.py              # Layer activation export
-analyze_layer_holdout_recoverability.py # Probing
-learn_semantic_directions.py            # Probe → edit directions
-analyze_representation_editing.py       # Full editing cohort
-analyze_edema_probe_screen.py           # Edema vs random (30 cases)
-analyze_volume_probe_screen.py          # Volume vs random (30 cases)
-analyze_layer_interventions.py          # Mean ablation (+ matched baseline)
-outputs_10hour/                         # Curated CSVs, figures, directions
-docs/manuscript/environment_and_split.md # Env + split provenance
+```bash
+python scripts/run_layer_aware_latent_risk.py \
+  --config configs/layer_aware_latent_risk.yaml \
+  --stage confidence
+```
+
+### 6. Final confidence + consistency evaluation
+
+Committed results can be inspected without re-running:
+
+```bash
+ls outputs_confidence_consistency_triage_20260712_030902
+cat outputs_method_validation/validation_summary.md
+```
+
+To recompute (needs layer embeddings + feature tables; may write a timestamped sibling directory):
+
+```bash
+python scripts/run_consistency_failure_detection.py \
+  --config configs/consistency_failure_detection.yaml
+
+python scripts/run_confidence_consistency_triage.py \
+  --config configs/confidence_consistency_triage.yaml
+
+python scripts/run_method_validation.py \
+  --config configs/method_validation.yaml
 ```
 
 ---
 
-## Data governance and license
+## Limitations and intended use
 
-Code is released for research. BraTS 2021 use is subject to [Synapse terms](https://www.synapse.org/#!Synapse:syn27046444). No patient identifiers are included in committed artifacts. BraTS: Menze et al., CVPR 2015; Bakas et al., 2017–2021.
+- One public dataset (BraTS 2021) and one U-Net in the main analysis.
+- No external cohort; retrospective computational study only.
+- No prospective reader workflow evaluation.
+- Limited benefit for edema-specific failure definitions.
+- Enhancing-fraction discrepancy features carry much of the consistency signal.
+- No supported improvement in risk–coverage AURC.
+- Representation editing did not provide automatic correction.
+- Exploratory edit screens use 30 cases; triage claims rest on the 375-case nested evaluation.
 
-No `LICENSE` file is present in this repository; license terms have not been finalized.
+**This repository is for research use only and is not a clinical product.**
+
+Author-facing wording cautions: `docs/reporting_notes.md`.
+
+---
+
+## Paper and citation
+
+**Title:** Anatomical Representation–Output Consistency Improves Confidence-Based Failure Triage in 3D Brain Tumor Segmentation  
+
+**Status:** Manuscript in preparation  
+
+**Link:** _to be added when a preprint or publication is available_
+
+```bibtex
+@article{mangalampalli_roc_triage_PLACEHOLDER,
+  title   = {Anatomical Representation--Output Consistency Improves Confidence-Based Failure Triage in 3D Brain Tumor Segmentation},
+  author  = {{AUTHORS PLACEHOLDER}},
+  journal = {{JOURNAL PLACEHOLDER}},
+  year    = {{YEAR PLACEHOLDER}},
+  doi     = {{DOI PLACEHOLDER}}
+}
+```
+
+---
+
+## Data governance
+
+Code is released for research. BraTS 2021 use follows [Synapse terms](https://www.synapse.org/#!Synapse:syn27046444). Committed tables do not include patient identifiers. BraTS references: Menze et al., CVPR 2015; Bakas et al., 2017–2021.
+
+No `LICENSE` file is present yet; license terms have not been finalized.
