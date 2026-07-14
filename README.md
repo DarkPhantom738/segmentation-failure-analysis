@@ -6,7 +6,7 @@
 
 This project studies the internal representations of a 3D U-Net for BraTS brain-tumor segmentation. Anatomical properties can often be decoded from those activations, but probe-derived edit directions did not consistently control or repair the final mask. What did help was measuring when the anatomy implied by a representation disagrees with the anatomy of the predicted mask, then combining those disagreements with ordinary inference-time confidence.
 
-In one sentence: this project helps a brain-tumor segmentation model flag which of its predictions are most likely to need human review.
+Essentially, this project helps a brain-tumor segmentation model flag which of its predictions are most likely to need human review.
 
 ---
 
