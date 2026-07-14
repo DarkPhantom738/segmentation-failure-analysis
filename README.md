@@ -55,7 +55,7 @@ relative_gap = abs(representation_estimate - predicted_mask_measurement)
 
 **Inference-time rule:** the triage score does not take ground-truth masks or GT-linked error maps as inputs. Ground truth is used only to fit probes inside training folds, define failure labels, and evaluate held-out performance.
 
-In prose, refer to features as representation–output enhancing-fraction gaps, edema-fraction gaps, whole-tumor-volume gaps, and so on—even when code columns still use historical names.
+Refer to features as representation–output enhancing-fraction gaps, edema-fraction gaps, whole-tumor-volume gaps, and so on—even when code columns still use historical names.
 
 ---
 
@@ -130,8 +130,6 @@ Source: `outputs_10hour/layer_interventions/matched_baseline/baseline_comparison
 ## Why this matters
 
 Internal maps can encode anatomy. That does not automatically give a handle for reliable control or automatic correction. The same encoding can still be useful for monitoring: when the representation’s anatomical story disagrees with the mask the network emits, that mismatch adds information beyond confidence for spotting **overall** bad cases that may need review.
-
-Claims we do **not** make: first-of-its-kind method; clinical correction; automatic repair; external generalization; universal behavior across architectures.
 
 ---
 
@@ -306,36 +304,13 @@ python scripts/run_method_validation.py \
 
 - One public dataset (BraTS 2021) and one U-Net in the main analysis.
 - No external cohort; retrospective computational study only.
-- No prospective reader workflow evaluation.
 - Limited benefit for edema-specific failure definitions.
 - Enhancing-fraction discrepancy features carry much of the consistency signal.
 - No supported improvement in risk–coverage AURC.
 - Representation editing did not provide automatic correction.
 - Exploratory edit screens use 30 cases; triage claims rest on the 375-case nested evaluation.
 
-**This repository is for research use only and is not a clinical product.**
 
-Author-facing wording cautions: `docs/reporting_notes.md`.
-
----
-
-## Paper and citation
-
-**Title:** Anatomical Representation–Output Consistency Improves Confidence-Based Failure Triage in 3D Brain Tumor Segmentation  
-
-**Status:** Manuscript in preparation  
-
-**Link:** _to be added when a preprint or publication is available_
-
-```bibtex
-@article{mangalampalli_roc_triage_PLACEHOLDER,
-  title   = {Anatomical Representation--Output Consistency Improves Confidence-Based Failure Triage in 3D Brain Tumor Segmentation},
-  author  = {{AUTHORS PLACEHOLDER}},
-  journal = {{JOURNAL PLACEHOLDER}},
-  year    = {{YEAR PLACEHOLDER}},
-  doi     = {{DOI PLACEHOLDER}}
-}
-```
 
 ---
 
