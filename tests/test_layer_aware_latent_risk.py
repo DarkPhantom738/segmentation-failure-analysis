@@ -43,11 +43,11 @@ def test_fold_assignments_partition_and_seed():
 
 
 def test_identical_outer_folds_across_methods():
-    """All methods must reuse the consistency fold file (same path in config)."""
+    """All methods must reuse the same fold_assignments file from config."""
     cfg = load_config(CONFIG)
-    assert "outputs_consistency_failure_detection/fold_assignments.csv" in str(
-        cfg["paths"]["fold_assignments"]
-    )
+    fold_path = Path(cfg["paths"]["fold_assignments"])
+    assert fold_path.name == "fold_assignments.csv"
+    assert fold_path.exists()
 
 
 def test_gt_leaked_cols_blocked():

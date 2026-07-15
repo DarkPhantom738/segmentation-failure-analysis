@@ -11,10 +11,10 @@ validation_output_dir: "outputs_method_validation"
 
 paths:
   layer_index: "outputs_10hour/layer_embeddings/layer_embedding_index.csv"
-  failure_table: "outputs_10hour/failure_tables/failure_metrics.csv"
-  fold_assignments: "outputs_consistency_failure_detection/fold_assignments.csv"
-  confidence_features: "outputs_layer_aware_latent_risk/case_level_confidence_features.csv"
-  consistency_features: "outputs_consistency_failure_detection/case_level_features.csv"
+  failure_table: "results/paper/failure_metrics.csv"
+  fold_assignments: "results/paper/fold_assignments.csv"
+  confidence_features: "results/paper/confidence_features.csv"
+  consistency_features: "results/paper/consistency/case_level_features.csv"
   output_dir: "outputs_method_validation"
 
 layers:

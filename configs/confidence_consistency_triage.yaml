@@ -8,10 +8,10 @@ model_seeds: [42, 123, 2026]
 
 paths:
   layer_index: "outputs_10hour/layer_embeddings/layer_embedding_index.csv"
-  failure_table: "outputs_10hour/failure_tables/failure_metrics.csv"
-  fold_assignments: "outputs_consistency_failure_detection/fold_assignments.csv"
-  confidence_features: "outputs_layer_aware_latent_risk/case_level_confidence_features.csv"
-  consistency_features: "outputs_consistency_failure_detection/case_level_features.csv"
+  failure_table: "results/paper/failure_metrics.csv"
+  fold_assignments: "results/paper/fold_assignments.csv"
+  confidence_features: "results/paper/confidence_features.csv"
+  consistency_features: "results/paper/consistency/case_level_features.csv"
   # Base name; if this dir already exists, a timestamped sibling is created
   # Canonical completed run: outputs_confidence_consistency_triage_20260712_030902
   output_dir: "outputs_confidence_consistency_triage"

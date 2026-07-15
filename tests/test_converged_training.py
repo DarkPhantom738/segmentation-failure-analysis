@@ -28,7 +28,7 @@ from src.training.converged_trainer import ConvergedTrainer, HISTORY_COLUMNS
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO / "configs" / "converged_unet.yaml"
-FAILURE_TABLE = REPO / "outputs_10hour" / "failure_tables" / "failure_metrics.csv"
+FAILURE_TABLE = REPO / "results" / "paper" / "failure_metrics.csv"
 CACHE_DIR = REPO / "outputs_10hour" / "cache"
 OUTPUTS_10HOUR = REPO / "outputs_10hour"
 

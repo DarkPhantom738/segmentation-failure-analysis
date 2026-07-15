@@ -1,4 +1,10 @@
-"""3D U-Net with bottleneck embedding extraction."""
+"""3D U-Net with bottleneck embedding and optional intermediate-layer hooks.
+
+The nine named stages in ``LAYER_NAMES`` are shared by training, TTA, layer
+embedding export, interventions, and consistency analysis. Forward returns
+``(logits, embedding, bottleneck)``; hookable activations are exposed for
+ablation / embedding export via helper methods further below.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Spatial stages in shallow→deep→shallow order (analysis configs use this list).
 LAYER_NAMES: Final[tuple[str, ...]] = (
     "encoder1",
     "encoder2",
@@ -55,55 +62,56 @@ class UNet3D(nn.Module):
         embedding_dim: int = 256,
     ) -> None:
         super().__init__()
-        f = base_features
+        # Channel width doubles each encoder stage (f, 2f, 4f, 8f, 16f at bottleneck).
+        width = base_features
 
-        self.enc1 = ConvBlock3D(in_channels, f)
+        self.enc1 = ConvBlock3D(in_channels, width)
         self.pool1 = nn.MaxPool3d(2)
-        self.enc2 = ConvBlock3D(f, f * 2)
+        self.enc2 = ConvBlock3D(width, width * 2)
         self.pool2 = nn.MaxPool3d(2)
-        self.enc3 = ConvBlock3D(f * 2, f * 4)
+        self.enc3 = ConvBlock3D(width * 2, width * 4)
         self.pool3 = nn.MaxPool3d(2)
-        self.enc4 = ConvBlock3D(f * 4, f * 8)
+        self.enc4 = ConvBlock3D(width * 4, width * 8)
         self.pool4 = nn.MaxPool3d(2)
 
-        self.bottleneck = ConvBlock3D(f * 8, f * 16)
+        self.bottleneck = ConvBlock3D(width * 8, width * 16)
         self.embedding_head = nn.Sequential(
             nn.AdaptiveAvgPool3d(1),
             nn.Flatten(),
-            nn.Linear(f * 16, embedding_dim),
+            nn.Linear(width * 16, embedding_dim),
         )
 
-        self.up4 = nn.ConvTranspose3d(f * 16, f * 8, kernel_size=2, stride=2)
-        self.dec4 = ConvBlock3D(f * 16, f * 8)
-        self.up3 = nn.ConvTranspose3d(f * 8, f * 4, kernel_size=2, stride=2)
-        self.dec3 = ConvBlock3D(f * 8, f * 4)
-        self.up2 = nn.ConvTranspose3d(f * 4, f * 2, kernel_size=2, stride=2)
-        self.dec2 = ConvBlock3D(f * 4, f * 2)
-        self.up1 = nn.ConvTranspose3d(f * 2, f, kernel_size=2, stride=2)
-        self.dec1 = ConvBlock3D(f * 2, f)
+        self.up4 = nn.ConvTranspose3d(width * 16, width * 8, kernel_size=2, stride=2)
+        self.dec4 = ConvBlock3D(width * 16, width * 8)
+        self.up3 = nn.ConvTranspose3d(width * 8, width * 4, kernel_size=2, stride=2)
+        self.dec3 = ConvBlock3D(width * 8, width * 4)
+        self.up2 = nn.ConvTranspose3d(width * 4, width * 2, kernel_size=2, stride=2)
+        self.dec2 = ConvBlock3D(width * 4, width * 2)
+        self.up1 = nn.ConvTranspose3d(width * 2, width, kernel_size=2, stride=2)
+        self.dec1 = ConvBlock3D(width * 2, width)
 
-        self.seg_head = nn.Conv3d(f, num_classes, kernel_size=1)
+        self.seg_head = nn.Conv3d(width, num_classes, kernel_size=1)
 
     def encode(self, x: torch.Tensor) -> tuple[list[torch.Tensor], torch.Tensor]:
         """Run the encoder and return skip features plus bottleneck activations."""
-        s1 = self.enc1(x)
-        s2 = self.enc2(self.pool1(s1))
-        s3 = self.enc3(self.pool2(s2))
-        s4 = self.enc4(self.pool3(s3))
-        bottleneck = self.bottleneck(self.pool4(s4))
-        return [s1, s2, s3, s4], bottleneck
+        skip1 = self.enc1(x)
+        skip2 = self.enc2(self.pool1(skip1))
+        skip3 = self.enc3(self.pool2(skip2))
+        skip4 = self.enc4(self.pool3(skip3))
+        bottleneck = self.bottleneck(self.pool4(skip4))
+        return [skip1, skip2, skip3, skip4], bottleneck
 
     def decode(self, skips: list[torch.Tensor], bottleneck: torch.Tensor) -> torch.Tensor:
-        """Decode from bottleneck using skip connections."""
-        s1, s2, s3, s4 = skips
+        """Decode from bottleneck using skip connections; return logits."""
+        skip1, skip2, skip3, skip4 = skips
         x = self.up4(bottleneck)
-        x = self.dec4(torch.cat([x, s4], dim=1))
+        x = self.dec4(torch.cat([x, skip4], dim=1))
         x = self.up3(x)
-        x = self.dec3(torch.cat([x, s3], dim=1))
+        x = self.dec3(torch.cat([x, skip3], dim=1))
         x = self.up2(x)
-        x = self.dec2(torch.cat([x, s2], dim=1))
+        x = self.dec2(torch.cat([x, skip2], dim=1))
         x = self.up1(x)
-        x = self.dec1(torch.cat([x, s1], dim=1))
+        x = self.dec1(torch.cat([x, skip1], dim=1))
         return self.seg_head(x)
 
     def forward(

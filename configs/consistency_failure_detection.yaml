@@ -7,7 +7,7 @@ n_bootstrap: 2000
 
 paths:
   layer_index: "outputs_10hour/layer_embeddings/layer_embedding_index.csv"
-  failure_table: "outputs_10hour/failure_tables/failure_metrics.csv"
+  failure_table: "results/paper/failure_metrics.csv"
   output_dir: "outputs_consistency_failure_detection"
 
 targets:

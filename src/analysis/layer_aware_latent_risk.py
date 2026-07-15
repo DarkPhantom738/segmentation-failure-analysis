@@ -54,6 +54,11 @@ def load_config(path: Path | str) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+# ---------------------------------------------------------------------------
+# Fold I/O and leakage guards
+# ---------------------------------------------------------------------------
+
+
 def load_outer_folds(fold_csv: Path) -> dict[int, dict[str, np.ndarray]]:
     """Load reused outer folds: fold → {train: idx, test: idx} over sorted case_ids."""
     folds = pd.read_csv(fold_csv)
@@ -61,48 +66,61 @@ def load_outer_folds(fold_csv: Path) -> dict[int, dict[str, np.ndarray]]:
     if not required.issubset(folds.columns):
         raise ValueError(f"fold_assignments missing columns: {required - set(folds.columns)}")
     case_ids = sorted(folds["case_id"].unique())
-    id_to_i = {c: i for i, c in enumerate(case_ids)}
-    out: dict[int, dict[str, np.ndarray]] = {}
-    for fold_i, sub in folds.groupby("outer_fold"):
-        tr = np.array(
-            [id_to_i[c] for c in sub.loc[sub["split"] == "train", "case_id"]],
+    case_id_to_row = {case_id: row_index for row_index, case_id in enumerate(case_ids)}
+    fold_splits: dict[int, dict[str, np.ndarray]] = {}
+    for fold_index, fold_rows in folds.groupby("outer_fold"):
+        train_indices = np.array(
+            [
+                case_id_to_row[case_id]
+                for case_id in fold_rows.loc[fold_rows["split"] == "train", "case_id"]
+            ],
             dtype=int,
         )
-        te = np.array(
-            [id_to_i[c] for c in sub.loc[sub["split"] == "test", "case_id"]],
+        test_indices = np.array(
+            [
+                case_id_to_row[case_id]
+                for case_id in fold_rows.loc[fold_rows["split"] == "test", "case_id"]
+            ],
             dtype=int,
         )
-        out[int(fold_i)] = {"train": np.sort(tr), "test": np.sort(te)}
-    # Exactly one test membership per case
-    test_count = np.zeros(len(case_ids), dtype=int)
-    for parts in out.values():
-        test_count[parts["test"]] += 1
-    if not np.array_equal(test_count, np.ones(len(case_ids), dtype=int)):
+        fold_splits[int(fold_index)] = {
+            "train": np.sort(train_indices),
+            "test": np.sort(test_indices),
+        }
+    # Exactly one test membership per case (outer CV partition).
+    test_membership_count = np.zeros(len(case_ids), dtype=int)
+    for parts in fold_splits.values():
+        test_membership_count[parts["test"]] += 1
+    if not np.array_equal(test_membership_count, np.ones(len(case_ids), dtype=int)):
         raise ValueError("Outer folds are not a partition (each case must be test once).")
-    return out
+    return fold_splits
 
 
 def verify_folds_match_seed(fold_csv: Path, n: int = 375, seed: int = 42) -> bool:
     """Confirm fold_assignments match KFold(5, shuffle=True, random_state=seed)."""
     stored = load_outer_folds(fold_csv)
     expected = list(KFold(n_splits=5, shuffle=True, random_state=seed).split(np.arange(n)))
-    # stored indices are over sorted case_ids; consistency experiment used
-    # case_df sorted by case_id — same ordering.
-    for fold_i, (tr, te) in enumerate(expected):
-        if not np.array_equal(np.sort(tr), stored[fold_i]["train"]):
+    # Stored indices are over sorted case_ids; the consistency experiment used
+    # the same case_id sort order.
+    for fold_index, (train_indices, test_indices) in enumerate(expected):
+        if not np.array_equal(np.sort(train_indices), stored[fold_index]["train"]):
             return False
-        if not np.array_equal(np.sort(te), stored[fold_i]["test"]):
+        if not np.array_equal(np.sort(test_indices), stored[fold_index]["test"]):
             return False
     return True
 
 
-def assert_no_gt_leak_features(columns: list[str], extra_forbidden: list[str] | None = None) -> None:
+def assert_no_gt_leak_features(
+    columns: list[str],
+    extra_forbidden: list[str] | None = None,
+) -> None:
+    """Raise if any column is known to encode GT-linked error/uncertainty."""
     banned = set(GT_LEAKED_COLS)
     if extra_forbidden:
         banned.update(extra_forbidden)
-    bad = [c for c in columns if c in banned]
-    if bad:
-        raise ValueError(f"GT-leaked features present: {bad}")
+    leaked = [column for column in columns if column in banned]
+    if leaked:
+        raise ValueError(f"GT-leaked features present: {leaked}")
 
 
 def compact_confidence_from_probabilities(
@@ -529,58 +547,75 @@ def run_full_nested_cv(config: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _impute_scale_train(
-    x: np.ndarray,
-    train_idx: np.ndarray,
+def impute_and_standardize_with_train(
+    features: np.ndarray,
+    train_indices: np.ndarray,
 ) -> tuple[np.ndarray, Any]:
+    """Impute non-finite values, fit StandardScaler on train rows, transform all."""
     from sklearn.preprocessing import StandardScaler
 
-    x = np.asarray(x, dtype=np.float64).copy()
-    for j in range(x.shape[1]):
-        col = x[:, j]
-        m = float(np.nanmean(col[train_idx])) if np.isfinite(col[train_idx]).any() else 0.0
-        col[~np.isfinite(col)] = m
-        x[:, j] = col
+    features = np.asarray(features, dtype=np.float64).copy()
+    for column_index in range(features.shape[1]):
+        column = features[:, column_index]
+        train_mean = (
+            float(np.nanmean(column[train_indices]))
+            if np.isfinite(column[train_indices]).any()
+            else 0.0
+        )
+        column[~np.isfinite(column)] = train_mean
+        features[:, column_index] = column
     scaler = StandardScaler()
-    scaler.fit(x[train_idx])
-    return scaler.transform(x), scaler
+    scaler.fit(features[train_indices])
+    return scaler.transform(features), scaler
 
 
-def _tune_logistic(x_tr: np.ndarray, y_tr: np.ndarray, Cs: list[float], seed: int):
+def tune_logistic_by_auprc(
+    features_train: np.ndarray,
+    labels_train: np.ndarray,
+    candidate_Cs: list[float],
+    seed: int,
+):
+    """Inner stratified search over C maximizing AUPRC; refit on all train rows."""
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import average_precision_score
     from sklearn.model_selection import StratifiedKFold
 
-    y_tr = y_tr.astype(int)
-    if y_tr.sum() < 2 or (len(y_tr) - y_tr.sum()) < 2:
-        m = LogisticRegression(C=1.0, max_iter=4000, class_weight="balanced")
-        m.fit(x_tr, y_tr)
-        return m
-    n_splits = min(4, int(y_tr.sum()), int(len(y_tr) - y_tr.sum()))
+    labels_train = labels_train.astype(int)
+    if labels_train.sum() < 2 or (len(labels_train) - labels_train.sum()) < 2:
+        model = LogisticRegression(C=1.0, max_iter=4000, class_weight="balanced")
+        model.fit(features_train, labels_train)
+        return model
+    n_splits = min(4, int(labels_train.sum()), int(len(labels_train) - labels_train.sum()))
     if n_splits < 2:
-        m = LogisticRegression(C=1.0, max_iter=4000, class_weight="balanced")
-        m.fit(x_tr, y_tr)
-        return m
-    best_c, best = Cs[0], -1.0
+        model = LogisticRegression(C=1.0, max_iter=4000, class_weight="balanced")
+        model.fit(features_train, labels_train)
+        return model
+
+    best_c, best_auprc = candidate_Cs[0], -1.0
     splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    for c in Cs:
-        scores = []
-        for tr, te in splitter.split(x_tr, y_tr):
-            if y_tr[tr].sum() == 0 or y_tr[tr].sum() == len(tr):
+    for c_value in candidate_Cs:
+        fold_auprcs: list[float] = []
+        for inner_train, inner_test in splitter.split(features_train, labels_train):
+            if labels_train[inner_train].sum() == 0 or labels_train[inner_train].sum() == len(inner_train):
                 continue
-            m = LogisticRegression(C=c, max_iter=4000, class_weight="balanced")
-            m.fit(x_tr[tr], y_tr[tr])
-            s = m.predict_proba(x_tr[te])[:, 1]
+            model = LogisticRegression(C=c_value, max_iter=4000, class_weight="balanced")
+            model.fit(features_train[inner_train], labels_train[inner_train])
+            probs = model.predict_proba(features_train[inner_test])[:, 1]
             try:
-                scores.append(average_precision_score(y_tr[te], s))
+                fold_auprcs.append(average_precision_score(labels_train[inner_test], probs))
             except Exception:
                 continue
-        mean_s = float(np.mean(scores)) if scores else -1.0
-        if mean_s > best:
-            best, best_c = mean_s, c
-    m = LogisticRegression(C=best_c, max_iter=4000, class_weight="balanced")
-    m.fit(x_tr, y_tr)
-    return m
+        mean_auprc = float(np.mean(fold_auprcs)) if fold_auprcs else -1.0
+        if mean_auprc > best_auprc:
+            best_auprc, best_c = mean_auprc, c_value
+
+    model = LogisticRegression(C=best_c, max_iter=4000, class_weight="balanced")
+    model.fit(features_train, labels_train)
+    return model
+
+
+_impute_scale_train = impute_and_standardize_with_train
+_tune_logistic = tune_logistic_by_auprc
 
 
 def run_baseline_comparisons(config: dict[str, Any]) -> dict[str, Any]:

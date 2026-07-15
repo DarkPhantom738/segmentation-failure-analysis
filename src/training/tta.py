@@ -1,4 +1,10 @@
-"""Test-time augmentation (TTA) for validation predictions."""
+"""Test-time augmentation (TTA) for validation predictions.
+
+Standard protocol: average softmax probabilities over the eight axis flip
+combinations (identity + all nonempty {x,y,z} flip subsets), each run with the
+same sliding-window overlap as un-augmented inference. Hard masks are then
+argmax of the averaged probabilities.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +21,7 @@ from src.training.inference import sliding_window_inference
 
 @dataclass(frozen=True)
 class FlipAugmentation:
-    """Single or combined spatial flip augmentation."""
+    """Single or combined spatial flip along depth/height/width axes."""
 
     name: str
     flip_z: bool
@@ -23,7 +29,7 @@ class FlipAugmentation:
     flip_x: bool
 
 
-# Standard 8-fold flip TTA.
+# Standard 8-fold flip TTA used by paper confidence features.
 STANDARD_TTA_AUGMENTATIONS: tuple[FlipAugmentation, ...] = (
     FlipAugmentation("identity", False, False, False),
     FlipAugmentation("flip_x", False, False, True),

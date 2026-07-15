@@ -1,4 +1,14 @@
-"""Fixed patient splits for converged multi-seed U-Net training."""
+"""Fixed patient splits for converged multi-seed U-Net training.
+
+Protocol (shared by all model seeds)
+------------------------------------
+1. Split the full discovered cohort with ``data_split_seed`` into
+   training_pool / final_evaluation (historical 876 / 375).
+2. Split training_pool with ``development_split_seed`` into
+   train / development (788 / 88).
+3. Persist JSON lists under ``outputs_converged/shared_split/`` so later seeds
+   reuse the exact same case IDs.
+"""
 
 from __future__ import annotations
 
@@ -15,14 +25,14 @@ from src.data.brats_dataset import (
 
 
 def seed_output_dirname(seed: int) -> str:
-    """Directory name for a model seed (seed_042, seed_123, seed_2026, ...)."""
+    """Directory name for a model seed (``seed_042``, ``seed_123``, ``seed_2026``, ...)."""
     if seed < 1000:
         return f"seed_{seed:03d}"
     return f"seed_{seed}"
 
 
 def case_list_hash(case_ids: Sequence[str]) -> str:
-    """Stable SHA256 over sorted case IDs."""
+    """Stable SHA256 over sorted case IDs (order-insensitive integrity check)."""
     payload = "\n".join(sorted(case_ids)).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 

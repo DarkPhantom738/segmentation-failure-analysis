@@ -1,4 +1,10 @@
-"""Shared layer-embedding I/O and probe helpers for recoverability / editing."""
+"""Shared layer-embedding I/O and anatomy-table helpers.
+
+Used by consistency / triage / recoverability paths to:
+- load the per-case embedding index CSV,
+- stack one layer's global-pooled vectors into a matrix,
+- derive anatomy / quality targets from GT masks (probe training / labels only).
+"""
 
 from __future__ import annotations
 
@@ -11,6 +17,7 @@ from scipy import ndimage
 from src.models.unet3d import LAYER_NAMES
 from src.training.metrics import whole_tumor_mask
 
+# Fixed U-Net stage order used across experiments.
 LAYER_ORDER = list(LAYER_NAMES)
 
 ANATOMY_TARGET_SPECS: dict[str, str] = {

@@ -23,7 +23,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from src.analysis.confidence_consistency_triage import _cls_metrics, resolve_output_dir
+from src.analysis.confidence_consistency_triage import (
+    classification_metrics_from_scores,
+    resolve_output_dir,
+)
 from src.analysis.layer_aware_latent_risk import load_outer_folds
 from src.analysis.layer_io import load_layer_index, load_layer_matrix
 from src.analysis.representation_output_consistency import (
@@ -32,7 +35,9 @@ from src.analysis.representation_output_consistency import (
 )
 from src.utils.io import ensure_dir
 
-# Frozen canonical run (per-target selection + primary calibration)
+# Frozen canonical run (per-target selection + primary calibration).
+# Prefer results/paper/triage_20260712 when present; keep historical path string
+# for configs that still point at the timestamped offline directory.
 CANONICAL_TRIAGE = Path("outputs_confidence_consistency_triage_20260712_030902")
 CONSISTENCY_OUTER = Path("outputs_consistency_failure_detection/outer_fold_predictions.csv")
 CONSISTENCY_FEATURES = Path("outputs_consistency_failure_detection/case_level_features.csv")
@@ -83,136 +88,176 @@ def load_config(path: Path | str) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def _scale_fit(x: np.ndarray, tr: np.ndarray) -> np.ndarray:
-    x = np.asarray(x, dtype=float).copy()
-    for j in range(x.shape[1]):
-        col = x[:, j]
-        m = float(np.nanmean(col[tr])) if np.isfinite(col[tr]).any() else 0.0
-        col[~np.isfinite(col)] = m
-        x[:, j] = col
-    sc = StandardScaler().fit(x[tr])
-    return sc.transform(x)
+# ---------------------------------------------------------------------------
+# Logistic baselines, metrics, and bootstrap helpers
+# ---------------------------------------------------------------------------
 
 
-def _fit_logistic_oof(
-    x: np.ndarray,
-    y: np.ndarray,
+def standardize_with_train_fold(features: np.ndarray, train_indices: np.ndarray) -> np.ndarray:
+    """Impute with train means, then StandardScaler fit on train only."""
+    features = np.asarray(features, dtype=float).copy()
+    for column_index in range(features.shape[1]):
+        column = features[:, column_index]
+        train_mean = (
+            float(np.nanmean(column[train_indices]))
+            if np.isfinite(column[train_indices]).any()
+            else 0.0
+        )
+        column[~np.isfinite(column)] = train_mean
+        features[:, column_index] = column
+    scaler = StandardScaler().fit(features[train_indices])
+    return scaler.transform(features)
+
+
+def fit_logistic_out_of_fold(
+    features: np.ndarray,
+    labels: np.ndarray,
     folds: dict[int, dict[str, np.ndarray]],
     seed: int = 42,
 ) -> np.ndarray:
-    scores = np.full(len(y), np.nan)
-    for fold_i, parts in sorted(folds.items()):
-        tr, te = parts["train"], parts["test"]
-        xs = _scale_fit(x, tr)
-        m = LogisticRegression(
+    """Outer-fold logistic OOF scores (same folds as triage / consistency)."""
+    oof_scores = np.full(len(labels), np.nan)
+    for fold_index, parts in sorted(folds.items()):
+        train_indices, test_indices = parts["train"], parts["test"]
+        features_scaled = standardize_with_train_fold(features, train_indices)
+        model = LogisticRegression(
             C=1.0,
             max_iter=2000,
             class_weight="balanced",
             solver="lbfgs",
-            random_state=seed + int(fold_i),
+            random_state=seed + int(fold_index),
         )
-        m.fit(xs[tr], y[tr].astype(int))
-        scores[te] = m.predict_proba(xs[te])[:, 1]
-    return scores
+        model.fit(features_scaled[train_indices], labels[train_indices].astype(int))
+        oof_scores[test_indices] = model.predict_proba(features_scaled[test_indices])[:, 1]
+    return oof_scores
 
 
-def _metrics_bundle(y: np.ndarray, s: np.ndarray, quality: np.ndarray) -> dict[str, float]:
-    y = y.astype(int)
-    s = np.asarray(s, dtype=float)
-    base = _cls_metrics(y, s)
-    cap = failure_capture_at_budget(s, y.astype(bool), budgets=BUDGETS)
-    rc = risk_coverage_curve(s, quality, coverages=COVERAGES)
+def metrics_bundle(
+    labels: np.ndarray,
+    risk_scores: np.ndarray,
+    quality: np.ndarray,
+) -> dict[str, float]:
+    """AUPRC/AUROC/Brier + capture@budget + risk–coverage for one score vector."""
+    labels = labels.astype(int)
+    risk_scores = np.asarray(risk_scores, dtype=float)
+    classification = classification_metrics_from_scores(labels, risk_scores)
+    capture = failure_capture_at_budget(risk_scores, labels.astype(bool), budgets=BUDGETS)
+    risk_coverage = risk_coverage_curve(risk_scores, quality, coverages=COVERAGES)
     out = {
-        "auprc": base["auprc"],
-        "auroc": base["auroc"],
-        "brier": base["brier"],
-        **{k: cap[k] for k in cap},
-        "aurc": rc["aurc"],
+        "auprc": classification["auprc"],
+        "auroc": classification["auroc"],
+        "brier": classification["brier"],
+        **{key: capture[key] for key in capture},
+        "aurc": risk_coverage["aurc"],
     }
-    for c in COVERAGES:
-        key = f"mean_dice_coverage_{int(c * 100)}"
-        out[key] = rc[key]
+    for coverage in COVERAGES:
+        key = f"mean_dice_coverage_{int(coverage * 100)}"
+        out[key] = risk_coverage[key]
     return out
 
 
-def _paired_bootstrap(
-    y: np.ndarray,
-    s_a: np.ndarray,
-    s_b: np.ndarray,
+def paired_bootstrap_deltas(
+    labels: np.ndarray,
+    scores_proposed: np.ndarray,
+    scores_baseline: np.ndarray,
     quality: np.ndarray,
     n_boot: int,
     seed: int,
 ) -> list[dict[str, float]]:
+    """Paired case-level bootstrap of proposed − baseline for key metrics."""
     rng = np.random.default_rng(seed)
-    n = len(y)
-    deltas = {"auprc": [], "capture20": [], "aurc": []}
+    n_cases = len(labels)
+    deltas: dict[str, list[float]] = {"auprc": [], "capture20": [], "aurc": []}
     for _ in range(n_boot):
-        idx = rng.integers(0, n, size=n)
-        yy, qa, qb, qq = y[idx], s_a[idx], s_b[idx], quality[idx]
-        if yy.sum() == 0 or yy.sum() == len(yy):
+        sample_indices = rng.integers(0, n_cases, size=n_cases)
+        labels_s = labels[sample_indices]
+        proposed_s = scores_proposed[sample_indices]
+        baseline_s = scores_baseline[sample_indices]
+        quality_s = quality[sample_indices]
+        if labels_s.sum() == 0 or labels_s.sum() == len(labels_s):
             continue
         deltas["auprc"].append(
-            average_precision_score(yy, qa) - average_precision_score(yy, qb)
+            average_precision_score(labels_s, proposed_s)
+            - average_precision_score(labels_s, baseline_s)
         )
-        ca = failure_capture_at_budget(qa, yy.astype(bool))["capture_at_20"]
-        cb = failure_capture_at_budget(qb, yy.astype(bool))["capture_at_20"]
-        deltas["capture20"].append(ca - cb)
-        ra = risk_coverage_curve(qa, qq)["aurc"]
-        rb = risk_coverage_curve(qb, qq)["aurc"]
-        # Lower AURC is better; report proposed - baseline so negative favors proposed
-        deltas["aurc"].append(ra - rb)
+        capture_proposed = failure_capture_at_budget(proposed_s, labels_s.astype(bool))[
+            "capture_at_20"
+        ]
+        capture_baseline = failure_capture_at_budget(baseline_s, labels_s.astype(bool))[
+            "capture_at_20"
+        ]
+        deltas["capture20"].append(capture_proposed - capture_baseline)
+        aurc_proposed = risk_coverage_curve(proposed_s, quality_s)["aurc"]
+        aurc_baseline = risk_coverage_curve(baseline_s, quality_s)["aurc"]
+        # Lower AURC is better; report proposed - baseline so negative favors proposed.
+        deltas["aurc"].append(aurc_proposed - aurc_baseline)
+
     rows = []
-    for metric, arr in deltas.items():
-        a = np.asarray(arr, dtype=float)
+    for metric, values in deltas.items():
+        arr = np.asarray(values, dtype=float)
         rows.append(
             {
                 "metric": metric,
-                "diff_mean": float(np.mean(a)),
-                "ci_low": float(np.quantile(a, 0.025)),
-                "ci_high": float(np.quantile(a, 0.975)),
-                "frac_proposed_better": float(np.mean(a > 0))
+                "diff_mean": float(np.mean(arr)),
+                "ci_low": float(np.quantile(arr, 0.025)),
+                "ci_high": float(np.quantile(arr, 0.975)),
+                "frac_proposed_better": float(np.mean(arr > 0))
                 if metric != "aurc"
-                else float(np.mean(a < 0)),
-                "n_boot": len(a),
+                else float(np.mean(arr < 0)),
+                "n_boot": len(arr),
             }
         )
     return rows
 
 
-def _gap_groups(feat: pd.DataFrame) -> dict[str, list[str]]:
-    gaps = [
-        c
-        for c in feat.columns
-        if c.startswith(("absolute_gap_", "signed_gap_", "standardized_gap_", "relative_gap_"))
+def gap_feature_groups(features: pd.DataFrame) -> dict[str, list[str]]:
+    """Named subsets of consistency-gap columns for ablation studies."""
+    gap_columns = [
+        column
+        for column in features.columns
+        if column.startswith(
+            ("absolute_gap_", "signed_gap_", "standardized_gap_", "relative_gap_")
+        )
     ]
     groups = {
-        "absolute_only": [c for c in gaps if c.startswith("absolute_gap_")],
-        "signed_only": [c for c in gaps if c.startswith("signed_gap_")],
-        "relative_only": [c for c in gaps if c.startswith("relative_gap_")],
-        "volume_related": [c for c in gaps if any(t in c for t in VOLUME_TARGETS)],
-        "tissue_fraction": [c for c in gaps if any(t in c for t in TISSUE_TARGETS)],
-        "shape_boundary": [c for c in gaps if any(t in c for t in SHAPE_TARGETS)],
-        "all_gaps": gaps,
+        "absolute_only": [c for c in gap_columns if c.startswith("absolute_gap_")],
+        "signed_only": [c for c in gap_columns if c.startswith("signed_gap_")],
+        "relative_only": [c for c in gap_columns if c.startswith("relative_gap_")],
+        "volume_related": [c for c in gap_columns if any(t in c for t in VOLUME_TARGETS)],
+        "tissue_fraction": [c for c in gap_columns if any(t in c for t in TISSUE_TARGETS)],
+        "shape_boundary": [c for c in gap_columns if any(t in c for t in SHAPE_TARGETS)],
+        "all_gaps": gap_columns,
     }
-    for t in ANATOMICAL_TARGETS:
-        groups[f"drop_{t}"] = [c for c in gaps if not c.endswith(f"_{t}")]
-    # Boundary complexity not a separate target in frozen method; compactness is proxy
+    for anatomy_target in ANATOMICAL_TARGETS:
+        groups[f"drop_{anatomy_target}"] = [
+            c for c in gap_columns if not c.endswith(f"_{anatomy_target}")
+        ]
+    # Boundary complexity is not a separate probe target; compactness is the proxy.
     groups["drop_boundary_complexity"] = groups["drop_gt_compactness"]
     return groups
 
 
-def _compute_tc_dice(index_df: pd.DataFrame, case_ids: list[str]) -> np.ndarray:
-    """Tumor-core Dice from frozen pred/GT masks."""
+def compute_tumor_core_dice(index_df: pd.DataFrame, case_ids: list[str]) -> np.ndarray:
+    """Tumor-core Dice from frozen pred/GT masks on disk."""
     from src.training.spatial_repair_trainer import tumor_core_dice
 
-    out = np.full(len(case_ids), np.nan)
-    idx = index_df.set_index("case_id")
-    for i, cid in enumerate(case_ids):
-        row = idx.loc[cid]
-        pred = np.load(row["path_prediction"])
-        gt = np.load(row["path_ground_truth"])
-        out[i] = float(tumor_core_dice(pred, gt))
-    return out
+    dice_scores = np.full(len(case_ids), np.nan)
+    index_by_case = index_df.set_index("case_id")
+    for row_index, case_id in enumerate(case_ids):
+        row = index_by_case.loc[case_id]
+        prediction = np.load(row["path_prediction"])
+        ground_truth = np.load(row["path_ground_truth"])
+        dice_scores[row_index] = float(tumor_core_dice(prediction, ground_truth))
+    return dice_scores
+
+
+# Back-compat aliases
+_scale_fit = standardize_with_train_fold
+_fit_logistic_oof = fit_logistic_out_of_fold
+_metrics_bundle = metrics_bundle
+_paired_bootstrap = paired_bootstrap_deltas
+_gap_groups = gap_feature_groups
+_compute_tc_dice = compute_tumor_core_dice
 
 
 def run_validation(config: dict[str, Any]) -> dict[str, Any]:

@@ -1,4 +1,9 @@
-"""Export globally pooled embeddings from multiple U-Net layers."""
+"""Export globally pooled embeddings from multiple U-Net layers.
+
+For each validation case, run sliding-window inference with layer hooks and
+write one .npy vector per stage under ``{output_dir}/{layer}/{case_id}.npy``,
+plus a CSV index used by consistency / triage.
+"""
 
 from __future__ import annotations
 

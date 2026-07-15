@@ -1,4 +1,9 @@
-"""Segmentation failure label computation."""
+"""Segmentation failure label computation (whole-tumor view).
+
+These helpers define voxel-level error masks and boundary statistics used when
+building failure tables. They require ground truth and are for labeling /
+analysis only — never as inference-time triage features.
+"""
 
 from __future__ import annotations
 
@@ -23,11 +28,11 @@ def compute_error_mask(
         false_positive_mask: predicted tumor but background in GT
         false_negative_mask: GT tumor but predicted background
     """
-    gt_tumor = whole_tumor_mask(ground_truth).astype(bool)
-    pred_tumor = whole_tumor_mask(prediction).astype(bool)
+    ground_truth_tumor = whole_tumor_mask(ground_truth).astype(bool)
+    predicted_tumor = whole_tumor_mask(prediction).astype(bool)
 
-    false_positive_mask = pred_tumor & ~gt_tumor
-    false_negative_mask = gt_tumor & ~pred_tumor
+    false_positive_mask = predicted_tumor & ~ground_truth_tumor
+    false_negative_mask = ground_truth_tumor & ~predicted_tumor
     error_mask = false_positive_mask | false_negative_mask
     return error_mask, false_positive_mask, false_negative_mask
 

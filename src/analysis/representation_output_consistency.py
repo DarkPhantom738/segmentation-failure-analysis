@@ -1,4 +1,18 @@
-"""Representation–output consistency features and nested-CV failure detection."""
+"""Representation–output consistency features and nested-CV failure detection.
+
+Pipeline overview
+-----------------
+1. Measure anatomy from the *predicted* mask (inference-time, no GT).
+2. Fit Ridge probes on hidden-layer embeddings to estimate the same anatomy
+   (GT used only inside training folds).
+3. Form gap features: signed / absolute / standardized / relative differences
+   between representation estimates and predicted-mask measurements.
+4. Combine gaps with optional morphology or quality probes and score failure
+   risk under nested CV.
+
+Ground-truth-linked uncertainty columns from failure tables must never enter
+as detector features (see GT_LEAKED_UNCERTAINTY_COLS).
+"""
 
 from __future__ import annotations
 
@@ -34,9 +48,13 @@ from src.training.spatial_repair_trainer import (
 )
 from src.utils.io import ensure_dir
 
+# BraTS label indices in the predicted / GT segmentation volumes.
+CLS_NECROSIS = 1
 CLS_EDEMA = 2
-CLS_ENH = 3
-CLS_NEC = 1
+CLS_ENHANCING = 3
+# Historical short names kept for readers of older code.
+CLS_NEC = CLS_NECROSIS
+CLS_ENH = CLS_ENHANCING
 
 # Inference-time confidence requires entropy/probability maps. The columns in
 # failure_metrics.csv (mean_entropy_error, entropy_error_auroc, overlap_top_*,
@@ -85,37 +103,59 @@ FORBIDDEN_FEATURE_SUBSTRINGS = (
 FORBIDDEN_FEATURE_EXACT = frozenset(GT_LEAKED_UNCERTAINTY_COLS)
 
 
+# ---------------------------------------------------------------------------
+# Predicted-mask anatomy and Ridge probes
+# ---------------------------------------------------------------------------
+
+
+def count_connected_components(binary_mask: np.ndarray) -> int:
+    """Count 3D connected components in a binary tumor mask."""
+    from scipy import ndimage
+
+    _, n_components = ndimage.label(binary_mask.astype(np.uint8))
+    return int(n_components)
+
+
+# Back-compat alias
+_n_components = count_connected_components
+
+
 def pred_mask_anatomy(pred: np.ndarray) -> dict[str, float]:
-    """Anatomy measured from predicted mask only (no GT dependence for volumes)."""
-    nec = float((pred == CLS_NEC).sum())
-    ed = float((pred == CLS_EDEMA).sum())
-    enh = float((pred == CLS_ENH).sum())
-    wt = nec + ed + enh
-    q = compute_prediction_quantities(pred, pred)
-    surface_to_vol = float(q["boundary_complexity"] * (wt ** (2.0 / 3.0)) / (wt + 1e-8)) if wt > 0 else 0.0
+    """Anatomy measured from predicted mask only (no GT dependence for volumes).
+
+    Column names keep the historical ``out_gt_*`` prefix even though values come
+    from the *predicted* mask — matching committed CSV schemas.
+    """
+    necrosis_voxels = float((pred == CLS_NECROSIS).sum())
+    edema_voxels = float((pred == CLS_EDEMA).sum())
+    enhancing_voxels = float((pred == CLS_ENHANCING).sum())
+    whole_tumor_voxels = necrosis_voxels + edema_voxels + enhancing_voxels
+    quantities = compute_prediction_quantities(pred, pred)
+    if whole_tumor_voxels > 0:
+        surface_to_volume = float(
+            quantities["boundary_complexity"]
+            * (whole_tumor_voxels ** (2.0 / 3.0))
+            / (whole_tumor_voxels + 1e-8)
+        )
+    else:
+        surface_to_volume = 0.0
     return {
-        "out_log_wt_volume": float(np.log1p(wt)),
-        "out_gt_edema_frac": float(ed / (wt + 1e-8)),
-        "out_gt_enhancing_frac": float(enh / (wt + 1e-8)),
-        "out_gt_necrosis_frac": float(nec / (wt + 1e-8)),
-        "out_gt_compactness": float(q["boundary_complexity"]),
-        "pred_tumor_volume": wt,
-        "pred_edema_volume": ed,
-        "pred_enhancing_volume": enh,
-        "pred_necrosis_volume": nec,
-        "n_components": float(_n_components(pred > 0)),
-        "surface_to_volume": surface_to_vol,
+        "out_log_wt_volume": float(np.log1p(whole_tumor_voxels)),
+        "out_gt_edema_frac": float(edema_voxels / (whole_tumor_voxels + 1e-8)),
+        "out_gt_enhancing_frac": float(enhancing_voxels / (whole_tumor_voxels + 1e-8)),
+        "out_gt_necrosis_frac": float(necrosis_voxels / (whole_tumor_voxels + 1e-8)),
+        "out_gt_compactness": float(quantities["boundary_complexity"]),
+        "pred_tumor_volume": whole_tumor_voxels,
+        "pred_edema_volume": edema_voxels,
+        "pred_enhancing_volume": enhancing_voxels,
+        "pred_necrosis_volume": necrosis_voxels,
+        "n_components": float(count_connected_components(pred > 0)),
+        "surface_to_volume": surface_to_volume,
     }
 
 
-def _n_components(mask: np.ndarray) -> int:
-    from scipy import ndimage
-
-    _, n = ndimage.label(mask.astype(np.uint8))
-    return int(n)
-
-
 def quality_labels(pred: np.ndarray, gt: np.ndarray) -> dict[str, float]:
+    """Per-case Dice quality labels (require ground truth; evaluation only)."""
     return {
         "label_edema_dice": float(edema_dice(pred, gt)),
         "label_mean_fg_dice": float(mean_foreground_dice(pred, gt)),
@@ -123,34 +163,42 @@ def quality_labels(pred: np.ndarray, gt: np.ndarray) -> dict[str, float]:
 
 
 def oof_ridge_predictions(
-    x: np.ndarray,
-    y: np.ndarray,
+    features: np.ndarray,
+    targets: np.ndarray,
     n_splits: int,
     seed: int,
     alphas: list[float],
 ) -> tuple[np.ndarray, float]:
-    y = np.asarray(y, dtype=np.float64)
-    x = np.asarray(x, dtype=np.float64)
-    preds = np.full(len(y), np.nan, dtype=np.float64)
-    n_splits = min(n_splits, len(y))
+    """Out-of-fold RidgeCV predictions and R² for selecting the best layer."""
+    targets = np.asarray(targets, dtype=np.float64)
+    features = np.asarray(features, dtype=np.float64)
+    predictions = np.full(len(targets), np.nan, dtype=np.float64)
+    n_splits = min(n_splits, len(targets))
     if n_splits < 2:
+        warnings_free_features = np.nan_to_num(features, nan=0.0)
         scaler = StandardScaler()
-        xs = scaler.fit_transform(np.nan_to_num(x, nan=0.0))
+        features_scaled = scaler.fit_transform(warnings_free_features)
         model = RidgeCV(alphas=np.asarray(alphas, dtype=float))
-        model.fit(xs, y)
-        preds[:] = model.predict(xs)
-        return preds, float("nan")
+        model.fit(features_scaled, targets)
+        predictions[:] = model.predict(features_scaled)
+        return predictions, float("nan")
+
     splitter = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    for tr, te in splitter.split(x):
+    for train_indices, test_indices in splitter.split(features):
         scaler = StandardScaler()
-        xtr = scaler.fit_transform(np.nan_to_num(x[tr], nan=0.0))
-        xte = scaler.transform(np.nan_to_num(x[te], nan=0.0))
+        features_train = scaler.fit_transform(np.nan_to_num(features[train_indices], nan=0.0))
+        features_test = scaler.transform(np.nan_to_num(features[test_indices], nan=0.0))
         model = RidgeCV(alphas=np.asarray(alphas, dtype=float))
-        model.fit(xtr, y[tr])
-        preds[te] = model.predict(xte)
-    valid = np.isfinite(preds) & np.isfinite(y)
-    r2 = float(r2_score(y[valid], preds[valid])) if valid.sum() > 2 else float("nan")
-    return preds, r2
+        model.fit(features_train, targets[train_indices])
+        predictions[test_indices] = model.predict(features_test)
+
+    valid = np.isfinite(predictions) & np.isfinite(targets)
+    r2 = (
+        float(r2_score(targets[valid], predictions[valid]))
+        if valid.sum() > 2
+        else float("nan")
+    )
+    return predictions, r2
 
 
 def fit_ridge_predict(
@@ -159,12 +207,13 @@ def fit_ridge_predict(
     x_test: np.ndarray,
     alphas: list[float],
 ) -> np.ndarray:
+    """Fit RidgeCV on train (scaled), predict on test with the same scaler."""
     scaler = StandardScaler()
-    xtr = scaler.fit_transform(np.nan_to_num(x_train, nan=0.0))
-    xte = scaler.transform(np.nan_to_num(x_test, nan=0.0))
+    features_train = scaler.fit_transform(np.nan_to_num(x_train, nan=0.0))
+    features_test = scaler.transform(np.nan_to_num(x_test, nan=0.0))
     model = RidgeCV(alphas=np.asarray(alphas, dtype=float))
-    model.fit(xtr, y_train)
-    return model.predict(xte)
+    model.fit(features_train, y_train)
+    return model.predict(features_test)
 
 
 def select_best_layer(
@@ -175,10 +224,11 @@ def select_best_layer(
     seed: int,
     alphas: list[float],
 ) -> tuple[str, float, np.ndarray]:
-    best_layer, best_r2, best_preds = layers[0], -1e9, None
-    for layer in layers:
-        preds, r2 = oof_ridge_predictions(
-            layer_matrices[layer],
+    """Choose the U-Net stage with highest OOF Ridge R² for one anatomy target."""
+    best_layer, best_r2, best_predictions = layers[0], -1e9, None
+    for layer_name in layers:
+        predictions, r2 = oof_ridge_predictions(
+            layer_matrices[layer_name],
             y,
             n_splits=n_splits,
             seed=seed,
@@ -186,31 +236,41 @@ def select_best_layer(
         )
         score = -1e9 if not np.isfinite(r2) else r2
         if score > best_r2:
-            best_layer, best_r2, best_preds = layer, score, preds
-    assert best_preds is not None
-    return best_layer, float(best_r2), best_preds
+            best_layer, best_r2, best_predictions = layer_name, score, predictions
+    assert best_predictions is not None
+    return best_layer, float(best_r2), best_predictions
 
 
 def build_gap_features(
-    rep: np.ndarray,
-    out: np.ndarray,
-    train_idx: np.ndarray,
-    prefix: str,
+    representation_estimate: np.ndarray,
+    predicted_mask_measurement: np.ndarray,
+    train_indices: np.ndarray,
+    anatomy_name: str,
 ) -> dict[str, np.ndarray]:
-    signed = rep - out
-    absolute = np.abs(signed)
-    std = float(np.nanstd(absolute[train_idx])) if len(train_idx) else 1.0
-    std = max(std, 1e-8)
-    relative = absolute / (np.abs(out) + 1e-6)
-    # Cap relative gaps using training-fold 99th percentile to avoid Ridge blow-ups.
-    cap = float(np.nanquantile(relative[train_idx], 0.99)) if len(train_idx) else 10.0
-    cap = max(cap, 1e-6)
-    relative = np.clip(relative, 0.0, cap)
+    """Build signed/absolute/standardized/relative rep–output gap columns.
+
+    Relative gaps are clipped at the training-fold 99th percentile so extreme
+    denom-near-zero ratios do not dominate later logistic fits.
+    """
+    signed_gap = representation_estimate - predicted_mask_measurement
+    absolute_gap = np.abs(signed_gap)
+    train_std = (
+        float(np.nanstd(absolute_gap[train_indices])) if len(train_indices) else 1.0
+    )
+    train_std = max(train_std, 1e-8)
+    relative_gap = absolute_gap / (np.abs(predicted_mask_measurement) + 1e-6)
+    relative_cap = (
+        float(np.nanquantile(relative_gap[train_indices], 0.99))
+        if len(train_indices)
+        else 10.0
+    )
+    relative_cap = max(relative_cap, 1e-6)
+    relative_gap = np.clip(relative_gap, 0.0, relative_cap)
     return {
-        f"signed_gap_{prefix}": signed,
-        f"absolute_gap_{prefix}": absolute,
-        f"standardized_gap_{prefix}": absolute / std,
-        f"relative_gap_{prefix}": relative,
+        f"signed_gap_{anatomy_name}": signed_gap,
+        f"absolute_gap_{anatomy_name}": absolute_gap,
+        f"standardized_gap_{anatomy_name}": absolute_gap / train_std,
+        f"relative_gap_{anatomy_name}": relative_gap,
     }
 
 
@@ -219,16 +279,23 @@ def impute_train_stats(
     train_idx: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Impute NaNs using training-fold column means only."""
-    out = x.astype(np.float64).copy()
-    means = np.zeros(out.shape[1], dtype=np.float64)
-    for j in range(out.shape[1]):
-        col_tr = out[train_idx, j]
-        m = float(np.nanmean(col_tr)) if np.isfinite(col_tr).any() else 0.0
-        means[j] = m
-        col = out[:, j]
-        col[~np.isfinite(col)] = m
-        out[:, j] = col
-    return out, means
+    filled = x.astype(np.float64).copy()
+    column_means = np.zeros(filled.shape[1], dtype=np.float64)
+    for column_index in range(filled.shape[1]):
+        train_column = filled[train_idx, column_index]
+        train_mean = (
+            float(np.nanmean(train_column)) if np.isfinite(train_column).any() else 0.0
+        )
+        column_means[column_index] = train_mean
+        column = filled[:, column_index]
+        column[~np.isfinite(column)] = train_mean
+        filled[:, column_index] = column
+    return filled, column_means
+
+
+# ---------------------------------------------------------------------------
+# Evaluation metrics (risk–coverage, capture, classification)
+# ---------------------------------------------------------------------------
 
 
 def risk_coverage_curve(
@@ -236,22 +303,26 @@ def risk_coverage_curve(
     quality: np.ndarray,
     coverages: list[float] | None = None,
 ) -> dict[str, float]:
+    """Retain lowest-risk cases and track mean quality vs coverage (AURC)."""
     if coverages is None:
         coverages = [0.5, 0.7, 0.8, 0.9]
+    # Ascending risk: keep safest cases first when increasing coverage.
     order = np.argsort(risk_scores)
     quality_sorted = quality[order]
-    n = len(quality)
-    grid = np.linspace(0.05, 1.0, 20)
-    risks = []
-    for c in grid:
-        k = max(1, int(round(c * n)))
-        risks.append(1.0 - float(np.mean(quality_sorted[:k])))
+    n_cases = len(quality)
+    coverage_grid = np.linspace(0.05, 1.0, 20)
+    empirical_risks = []
+    for coverage in coverage_grid:
+        n_keep = max(1, int(round(coverage * n_cases)))
+        empirical_risks.append(1.0 - float(np.mean(quality_sorted[:n_keep])))
     trapz = getattr(np, "trapezoid", None) or np.trapz
-    out: dict[str, float] = {"aurc": float(trapz(risks, grid))}
-    for c in coverages:
-        k = max(1, int(round(c * n)))
-        out[f"mean_dice_coverage_{int(c * 100)}"] = float(np.mean(quality_sorted[:k]))
-    return out
+    metrics: dict[str, float] = {"aurc": float(trapz(empirical_risks, coverage_grid))}
+    for coverage in coverages:
+        n_keep = max(1, int(round(coverage * n_cases)))
+        metrics[f"mean_dice_coverage_{int(coverage * 100)}"] = float(
+            np.mean(quality_sorted[:n_keep])
+        )
+    return metrics
 
 
 def failure_capture_at_budget(
@@ -259,17 +330,21 @@ def failure_capture_at_budget(
     is_failure: np.ndarray,
     budgets: list[float] | None = None,
 ) -> dict[str, float]:
+    """Fraction of true failures found among the top risk-budget fraction."""
     if budgets is None:
         budgets = [0.1, 0.2, 0.3]
+    # Descending risk: review highest-risk cases first.
     order = np.argsort(-risk_scores)
-    fails = is_failure.astype(bool)[order]
-    n_fail = max(int(fails.sum()), 1)
-    out: dict[str, float] = {}
-    n = len(risk_scores)
-    for b in budgets:
-        k = max(1, int(round(b * n)))
-        out[f"capture_at_{int(b * 100)}"] = float(fails[:k].sum() / n_fail)
-    return out
+    failures_ranked = is_failure.astype(bool)[order]
+    n_failures = max(int(failures_ranked.sum()), 1)
+    metrics: dict[str, float] = {}
+    n_cases = len(risk_scores)
+    for budget in budgets:
+        n_review = max(1, int(round(budget * n_cases)))
+        metrics[f"capture_at_{int(budget * 100)}"] = float(
+            failures_ranked[:n_review].sum() / n_failures
+        )
+    return metrics
 
 
 def classification_metrics(y_true: np.ndarray, scores: np.ndarray) -> dict[str, float]:
@@ -480,6 +555,11 @@ def build_case_table(
     ]
     layer_matrices = {name: load_layer_matrix(case_df, name) for name in layers}
     return case_df, layer_matrices, anatomy_gt
+
+
+# ---------------------------------------------------------------------------
+# Nested cross-validation scoring
+# ---------------------------------------------------------------------------
 
 
 def nested_cv_predictions(

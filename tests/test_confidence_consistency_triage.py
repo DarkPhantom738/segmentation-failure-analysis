@@ -53,9 +53,9 @@ def test_morphology_from_pred_not_gt():
 
 def test_identical_outer_folds_path():
     cfg = load_config(CONFIG)
-    assert "outputs_consistency_failure_detection/fold_assignments.csv" in str(
-        cfg["paths"]["fold_assignments"]
-    )
+    fold_path = str(cfg["paths"]["fold_assignments"])
+    assert fold_path.endswith("fold_assignments.csv")
+    assert Path(fold_path).exists()
 
 
 def test_confidence_csv_exact_match_flag():

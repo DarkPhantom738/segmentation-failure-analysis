@@ -1,4 +1,15 @@
-"""Leakage-safe validation: does consistency add value beyond confidence?"""
+"""Confidence + representation–output consistency failure triage (nested CV).
+
+Primary question: does adding consistency-gap features improve failure ranking
+beyond TTA confidence alone, under leakage-safe nested cross-validation?
+
+Leakage rules
+-------------
+- Confidence features must be GT-free (TTA softmax summaries only).
+- Ground truth is allowed only inside training folds for Ridge anatomy probes,
+  failure-label definition, and held-out evaluation.
+- Outer folds are reused from the consistency pipeline (same case IDs / seed).
+"""
 
 from __future__ import annotations
 
@@ -64,165 +75,237 @@ ARTIFACT_INVENTORY = """# Artifact inventory — Confidence + Consistency Triage
 """
 
 
+# ---------------------------------------------------------------------------
+# Feature preprocessing and logistic helpers
+# ---------------------------------------------------------------------------
+
+
 def load_config(path: Path | str) -> dict[str, Any]:
     with open(path) as f:
         return yaml.safe_load(f)
 
 
-def _impute(x: np.ndarray, train_idx: np.ndarray) -> np.ndarray:
-    out = np.asarray(x, dtype=np.float64).copy()
-    for j in range(out.shape[1]):
-        col = out[:, j]
-        m = float(np.nanmean(col[train_idx])) if np.isfinite(col[train_idx]).any() else 0.0
-        col[~np.isfinite(col)] = m
-        out[:, j] = col
-    return out
+def impute_missing_with_train_mean(
+    features: np.ndarray,
+    train_indices: np.ndarray,
+) -> np.ndarray:
+    """Replace non-finite entries with each column's training-fold mean."""
+    filled = np.asarray(features, dtype=np.float64).copy()
+    for column_index in range(filled.shape[1]):
+        column = filled[:, column_index]
+        train_values = column[train_indices]
+        train_mean = (
+            float(np.nanmean(train_values)) if np.isfinite(train_values).any() else 0.0
+        )
+        column[~np.isfinite(column)] = train_mean
+        filled[:, column_index] = column
+    return filled
 
 
-def _scale(x: np.ndarray, train_idx: np.ndarray) -> np.ndarray:
-    x = _impute(x, train_idx)
+def standardize_features_with_train_stats(
+    features: np.ndarray,
+    train_indices: np.ndarray,
+) -> np.ndarray:
+    """Impute then StandardScaler-fit on training rows only; transform all rows."""
+    features = impute_missing_with_train_mean(features, train_indices)
     scaler = StandardScaler()
-    scaler.fit(x[train_idx])
-    return scaler.transform(x)
+    scaler.fit(features[train_indices])
+    return scaler.transform(features)
 
 
-def _tune_logistic(
-    x_tr: np.ndarray,
-    y_tr: np.ndarray,
-    Cs: list[float],
+def tune_logistic_regression(
+    features_train: np.ndarray,
+    labels_train: np.ndarray,
+    candidate_Cs: list[float],
     seed: int,
     penalty: str = "l2",
     l1_ratio: float = 0.5,
 ) -> LogisticRegression:
-    y_tr = y_tr.astype(int)
-    # sklearn>=1.8 prefers l1_ratio over deprecated penalty=
-    kwargs: dict[str, Any] = {
+    """Pick C (and optional elastic-net) by inner stratified AUPRC, then refit."""
+    labels_train = labels_train.astype(int)
+    # sklearn>=1.8: pass l1_ratio even for L2 (0.0) when using solver="saga".
+    model_kwargs: dict[str, Any] = {
         "max_iter": 5000,
         "class_weight": "balanced",
         "random_state": seed,
         "solver": "saga",
     }
     if penalty == "elasticnet":
-        kwargs["l1_ratio"] = float(l1_ratio)
+        model_kwargs["l1_ratio"] = float(l1_ratio)
     else:
-        kwargs["l1_ratio"] = 0.0  # L2
+        model_kwargs["l1_ratio"] = 0.0  # pure L2
 
-    if y_tr.sum() < 2 or (len(y_tr) - y_tr.sum()) < 2:
-        m = LogisticRegression(C=1.0, **kwargs)
-        m.fit(x_tr, y_tr)
-        return m
+    n_positive = int(labels_train.sum())
+    n_negative = int(len(labels_train) - n_positive)
+    if n_positive < 2 or n_negative < 2:
+        model = LogisticRegression(C=1.0, **model_kwargs)
+        model.fit(features_train, labels_train)
+        return model
 
-    n_splits = min(4, int(y_tr.sum()), int(len(y_tr) - y_tr.sum()))
+    n_splits = min(4, n_positive, n_negative)
     if n_splits < 2:
-        m = LogisticRegression(C=1.0, **kwargs)
-        m.fit(x_tr, y_tr)
-        return m
+        model = LogisticRegression(C=1.0, **model_kwargs)
+        model.fit(features_train, labels_train)
+        return model
 
-    best_c, best = Cs[0], -1.0
+    best_c, best_auprc = candidate_Cs[0], -1.0
     splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    for c in Cs:
-        vals = []
-        for tr, te in splitter.split(x_tr, y_tr):
-            if y_tr[tr].sum() == 0 or y_tr[tr].sum() == len(tr):
+    for c_value in candidate_Cs:
+        fold_auprcs: list[float] = []
+        for inner_train, inner_test in splitter.split(features_train, labels_train):
+            if labels_train[inner_train].sum() == 0 or labels_train[inner_train].sum() == len(inner_train):
                 continue
-            m = LogisticRegression(C=c, **kwargs)
-            m.fit(x_tr[tr], y_tr[tr])
+            model = LogisticRegression(C=c_value, **model_kwargs)
+            model.fit(features_train[inner_train], labels_train[inner_train])
             try:
-                vals.append(average_precision_score(y_tr[te], m.predict_proba(x_tr[te])[:, 1]))
+                probs = model.predict_proba(features_train[inner_test])[:, 1]
+                fold_auprcs.append(average_precision_score(labels_train[inner_test], probs))
             except Exception:
                 continue
-        score = float(np.mean(vals)) if vals else -1.0
-        if score > best:
-            best, best_c = score, c
-    m = LogisticRegression(C=best_c, **kwargs)
-    m.fit(x_tr, y_tr)
-    return m
+        mean_auprc = float(np.mean(fold_auprcs)) if fold_auprcs else -1.0
+        if mean_auprc > best_auprc:
+            best_auprc, best_c = mean_auprc, c_value
+
+    model = LogisticRegression(C=best_c, **model_kwargs)
+    model.fit(features_train, labels_train)
+    return model
 
 
-def _cls_metrics(y: np.ndarray, s: np.ndarray) -> dict[str, float]:
-    y = y.astype(int)
-    s = np.asarray(s, dtype=float)
-    if y.sum() == 0 or y.sum() == len(y):
-        return {k: float("nan") for k in (
-            "auroc", "auprc", "brier", "sensitivity", "specificity", "ppv", "npv",
-            "calibration_slope", "calibration_intercept",
-        )}
-    pred = (s >= 0.5).astype(int)
-    tp = int(((pred == 1) & (y == 1)).sum())
-    tn = int(((pred == 0) & (y == 0)).sum())
-    fp = int(((pred == 1) & (y == 0)).sum())
-    fn = int(((pred == 0) & (y == 1)).sum())
+def classification_metrics_from_scores(
+    labels: np.ndarray,
+    risk_scores: np.ndarray,
+) -> dict[str, float]:
+    """AUROC/AUPRC/Brier plus threshold-0.5 confusion and linear calibration."""
+    labels = labels.astype(int)
+    risk_scores = np.asarray(risk_scores, dtype=float)
+    metric_keys = (
+        "auroc",
+        "auprc",
+        "brier",
+        "sensitivity",
+        "specificity",
+        "ppv",
+        "npv",
+        "calibration_slope",
+        "calibration_intercept",
+    )
+    if labels.sum() == 0 or labels.sum() == len(labels):
+        return {key: float("nan") for key in metric_keys}
+
+    binary_pred = (risk_scores >= 0.5).astype(int)
+    true_positive = int(((binary_pred == 1) & (labels == 1)).sum())
+    true_negative = int(((binary_pred == 0) & (labels == 0)).sum())
+    false_positive = int(((binary_pred == 1) & (labels == 0)).sum())
+    false_negative = int(((binary_pred == 0) & (labels == 1)).sum())
     from sklearn.linear_model import LinearRegression
 
-    cal = LinearRegression().fit(s.reshape(-1, 1), y.astype(float))
+    calibration = LinearRegression().fit(
+        risk_scores.reshape(-1, 1), labels.astype(float)
+    )
     return {
-        "auroc": float(roc_auc_score(y, s)),
-        "auprc": float(average_precision_score(y, s)),
-        "brier": float(brier_score_loss(y, np.clip(s, 1e-6, 1 - 1e-6))),
-        "sensitivity": tp / max(tp + fn, 1),
-        "specificity": tn / max(tn + fp, 1),
-        "ppv": tp / max(tp + fp, 1),
-        "npv": tn / max(tn + fn, 1),
-        "calibration_slope": float(cal.coef_[0]),
-        "calibration_intercept": float(cal.intercept_),
+        "auroc": float(roc_auc_score(labels, risk_scores)),
+        "auprc": float(average_precision_score(labels, risk_scores)),
+        "brier": float(brier_score_loss(labels, np.clip(risk_scores, 1e-6, 1 - 1e-6))),
+        "sensitivity": true_positive / max(true_positive + false_negative, 1),
+        "specificity": true_negative / max(true_negative + false_positive, 1),
+        "ppv": true_positive / max(true_positive + false_positive, 1),
+        "npv": true_negative / max(true_negative + false_negative, 1),
+        "calibration_slope": float(calibration.coef_[0]),
+        "calibration_intercept": float(calibration.intercept_),
     }
 
 
-def _consistency_column_sets(gap_names: list[str], targets: list[str]) -> dict[str, list[str]]:
-    abs_cols = [c for c in gap_names if c.startswith("absolute_gap_")]
-    signed_cols = [c for c in gap_names if c.startswith("signed_gap_")]
-    std_cols = [c for c in gap_names if c.startswith("standardized_gap_")]
-    one_abs = [f"absolute_gap_{t}" for t in targets if f"absolute_gap_{t}" in gap_names]
-    # all = gaps + rep_* + out_* will be filtered by name prefix later
+def consistency_feature_column_sets(
+    gap_column_names: list[str],
+    anatomy_targets: list[str],
+) -> dict[str, list[str]]:
+    """Named subsets of consistency-gap columns for inner-mode selection."""
+    absolute_columns = [c for c in gap_column_names if c.startswith("absolute_gap_")]
+    signed_columns = [c for c in gap_column_names if c.startswith("signed_gap_")]
+    standardized_columns = [c for c in gap_column_names if c.startswith("standardized_gap_")]
+    one_absolute_per_target = [
+        f"absolute_gap_{target}"
+        for target in anatomy_targets
+        if f"absolute_gap_{target}" in gap_column_names
+    ]
     return {
-        "all": gap_names[:],
-        "absolute_only": abs_cols,
-        "signed_only": signed_cols,
-        "standardized_only": std_cols,
-        "one_per_target_abs": one_abs,
-        "elasticnet": gap_names[:],  # selection via elastic-net coefs
+        "all": gap_column_names[:],
+        "absolute_only": absolute_columns,
+        "signed_only": signed_columns,
+        "standardized_only": standardized_columns,
+        "one_per_target_abs": one_absolute_per_target,
+        # Same column pool; sparse selection happens via elastic-net coefficients.
+        "elasticnet": gap_column_names[:],
     }
 
 
-def _select_mode_inner(
-    x_by_mode: dict[str, np.ndarray],
-    y: np.ndarray,
-    train_idx: np.ndarray,
-    Cs: list[float],
+def select_consistency_mode_inner(
+    features_by_mode: dict[str, np.ndarray],
+    labels: np.ndarray,
+    train_indices: np.ndarray,
+    candidate_Cs: list[float],
     seed: int,
 ) -> str:
     """Pick consistency feature mode by inner OOF AUPRC on outer-train only."""
-    best_mode, best = "all", -1.0
-    y_tr = y[train_idx]
-    if y_tr.sum() < 2 or (len(y_tr) - y_tr.sum()) < 2:
+    best_mode, best_auprc = "all", -1.0
+    labels_train = labels[train_indices]
+    if labels_train.sum() < 2 or (len(labels_train) - labels_train.sum()) < 2:
         return "all"
-    n_splits = min(4, int(y_tr.sum()), int(len(y_tr) - y_tr.sum()))
+    n_splits = min(4, int(labels_train.sum()), int(len(labels_train) - labels_train.sum()))
     if n_splits < 2:
         return "all"
+
     splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    for mode, x_full in x_by_mode.items():
-        if x_full.shape[1] == 0:
+    for mode_name, features_full in features_by_mode.items():
+        if features_full.shape[1] == 0:
             continue
-        x = _scale(x_full, train_idx)
-        vals = []
-        for tr_rel, te_rel in splitter.split(x[train_idx], y_tr):
-            tr = train_idx[tr_rel]
-            te = train_idx[te_rel]
-            if y[tr].sum() == 0 or y[tr].sum() == len(tr):
+        features = standardize_features_with_train_stats(features_full, train_indices)
+        fold_auprcs: list[float] = []
+        for relative_train, relative_test in splitter.split(features[train_indices], labels_train):
+            absolute_train = train_indices[relative_train]
+            absolute_test = train_indices[relative_test]
+            if labels[absolute_train].sum() == 0 or labels[absolute_train].sum() == len(absolute_train):
                 continue
-            # elasticnet mode uses elastic-net penalty
-            if mode == "elasticnet":
-                m = _tune_logistic(x[tr], y[tr], Cs, seed, penalty="elasticnet", l1_ratio=0.5)
+            if mode_name == "elasticnet":
+                model = tune_logistic_regression(
+                    features[absolute_train],
+                    labels[absolute_train],
+                    candidate_Cs,
+                    seed,
+                    penalty="elasticnet",
+                    l1_ratio=0.5,
+                )
             else:
-                m = _tune_logistic(x[tr], y[tr], Cs, seed, penalty="l2")
+                model = tune_logistic_regression(
+                    features[absolute_train],
+                    labels[absolute_train],
+                    candidate_Cs,
+                    seed,
+                    penalty="l2",
+                )
             try:
-                vals.append(average_precision_score(y[te], m.predict_proba(x[te])[:, 1]))
+                probs = model.predict_proba(features[absolute_test])[:, 1]
+                fold_auprcs.append(average_precision_score(labels[absolute_test], probs))
             except Exception:
                 continue
-        score = float(np.mean(vals)) if vals else -1.0
-        if score > best:
-            best, best_mode = score, mode
+        mean_auprc = float(np.mean(fold_auprcs)) if fold_auprcs else -1.0
+        if mean_auprc > best_auprc:
+            best_auprc, best_mode = mean_auprc, mode_name
     return best_mode
+
+
+# Back-compat aliases for any external callers / older notebooks.
+_impute = impute_missing_with_train_mean
+_scale = standardize_features_with_train_stats
+_tune_logistic = tune_logistic_regression
+_cls_metrics = classification_metrics_from_scores
+_consistency_column_sets = consistency_feature_column_sets
+_select_mode_inner = select_consistency_mode_inner
+
+
+# ---------------------------------------------------------------------------
+# Case loading and nested-CV triage
+# ---------------------------------------------------------------------------
 
 
 def resolve_output_dir(config: dict[str, Any]) -> Path:
@@ -302,6 +385,11 @@ def build_case_base(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[str, Any]:
+    """Run nested-CV triage for all method / failure-definition combinations.
+
+    For each outer fold: fit anatomy probes on train, build consistency gaps,
+    choose a gap-feature mode, score methods on the held-out test fold.
+    """
     seed = int(config["seed"])
     model_seed = int(model_seed if model_seed is not None else seed)
     base = build_case_base(config)
@@ -309,19 +397,20 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
     out_dir = base["out_dir"]
     fig_dir = ensure_dir(out_dir / "figures")
 
-    n = len(base["case_ids"])
+    n_cases = len(base["case_ids"])
     layers = base["layers"]
     targets = list(config["consistency_targets"])
     alphas = list(config["ridge_alphas"])
-    Cs = list(config["logistic_C"])
-    inner = int(config["inner_folds"])
-    n_boot = int(config["n_bootstrap"])
+    candidate_Cs = list(config["logistic_C"])
+    inner_folds = int(config["inner_folds"])
+    n_bootstrap = int(config["n_bootstrap"])
 
-    conf_mat = base["conf"][base["conf_cols"]].to_numpy(float)
-    morph_mat = base["cons"][base["morph_cols"]].to_numpy(float)
-    pooled = np.concatenate([base["layer_mats"][L] for L in layers], axis=1)
-    mean_fg = base["mean_fg"]
-    edema_d = base["edema_d"]
+    # Feature families (aligned row order = case_ids)
+    confidence_matrix = base["conf"][base["conf_cols"]].to_numpy(float)
+    morphology_matrix = base["cons"][base["morph_cols"]].to_numpy(float)
+    pooled_representations = np.concatenate([base["layer_mats"][layer] for layer in layers], axis=1)
+    mean_foreground_dice = base["mean_fg"]
+    edema_dice_scores = base["edema_d"]
 
     methods = [
         "confidence",
@@ -329,23 +418,46 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
         "consistency",
         "conf_morph",
         "conf_pooled",
-        "conf_consistency",  # proposed
+        "conf_consistency",  # proposed: confidence + consistency gaps
         "conf_morph_consistency",
     ]
-    fail_defs = list(config["failure_defs"])
-    scores = {(m, f): np.full(n, np.nan) for m in methods for f in fail_defs}
-    scores_cal = {("conf_consistency", f): np.full(n, np.nan) for f in fail_defs}
-    fail_y = {f: np.full(n, np.nan) for f in fail_defs}
+    failure_definitions = list(config["failure_defs"])
+    scores = {
+        (method, failure_def): np.full(n_cases, np.nan)
+        for method in methods
+        for failure_def in failure_definitions
+    }
+    scores_calibrated = {
+        ("conf_consistency", failure_def): np.full(n_cases, np.nan)
+        for failure_def in failure_definitions
+    }
+    failure_labels = {failure_def: np.full(n_cases, np.nan) for failure_def in failure_definitions}
 
-    # Store held-out consistency features (test only)
+    # Store held-out consistency features (test folds only).
+    # Shorter local names below match the long fold body for minimal churn.
     held_feat: dict[str, np.ndarray] = {}
-    sel_rows = []
-    coef_rows = []
-    fold_metric_rows = []
-    layer_rows = []
+    sel_rows: list[dict[str, Any]] = []
+    coef_rows: list[dict[str, Any]] = []
+    fold_metric_rows: list[dict[str, Any]] = []
+    layer_rows: list[dict[str, Any]] = []
+    n = n_cases
+    Cs = candidate_Cs
+    inner = inner_folds
+    n_boot = n_bootstrap
+    conf_mat = confidence_matrix
+    morph_mat = morphology_matrix
+    pooled = pooled_embeddings
+    mean_fg = mean_foreground_dice
+    edema_d = edema_dice_scores
+    fail_defs = failure_definitions
+    scores_cal = scores_calibrated
+    fail_y = failure_labels
 
+    # ---- Outer nested CV ----------------------------------------------------
     for fold_i, parts in sorted(base["folds"].items()):
+        # train_indices / test_indices: outer-train and held-out test case rows
         tr, te = parts["train"], parts["test"]
+        # Failure thresholds use outer-train quantiles only (no test leakage).
         cut_fg = float(np.quantile(mean_fg[tr], 0.20))
         cut_ed = float(np.quantile(edema_d[tr], 0.20))
         y_map = {
@@ -358,7 +470,7 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
         for fdef, y in y_map.items():
             fail_y[fdef][te] = y[te]
 
-        # --- probes + gaps (train-only layer selection) ---
+        # --- Anatomy probes + consistency gaps (train-only layer selection) ---
         fold_gaps: dict[str, np.ndarray] = {}
         rep_cols: dict[str, np.ndarray] = {}
         out_cols: dict[str, np.ndarray] = {}
@@ -415,7 +527,7 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
             + [f"out_{t}" for t in targets]
         )
 
-        mode_sets = _consistency_column_sets(gap_names, targets)
+        mode_sets = consistency_feature_column_sets(gap_names, targets)
         # Build mode matrices from gaps only for selection (compact)
         x_by_mode = {
             mode: np.column_stack([fold_gaps[c] for c in cols]) if cols else np.zeros((n, 0))
@@ -428,7 +540,7 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
 
         # Select consistency feature mode separately per failure target (outer-train only)
         for fdef, y_all in y_map.items():
-            selected_mode = _select_mode_inner(
+            selected_mode = select_consistency_mode_inner(
                 x_by_mode,
                 y_all,
                 tr,
@@ -437,8 +549,8 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
             )
             cons_sel = x_by_mode[selected_mode]
             if selected_mode == "elasticnet":
-                x_tmp = _scale(cons_sel, tr)
-                en = _tune_logistic(
+                x_tmp = standardize_features_with_train_stats(cons_sel, tr)
+                en = tune_logistic_regression(
                     x_tmp[tr],
                     y_all[tr],
                     Cs,
@@ -488,15 +600,15 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
             for method, raw in feature_sets.items():
                 if raw.size == 0 or raw.shape[1] == 0:
                     continue
-                x = _scale(raw, tr)
-                model = _tune_logistic(x[tr], y_all[tr], Cs, seed=model_seed + fold_i)
+                x = standardize_features_with_train_stats(raw, tr)
+                model = tune_logistic_regression(x[tr], y_all[tr], Cs, seed=model_seed + fold_i)
                 s_te = model.predict_proba(x[te])[:, 1]
                 scores[(method, fdef)][te] = s_te
 
                 if method == "conf_consistency" and fdef in primary_targets:
                     # Platt calibration on outer-train only (inner CV inside CalibratedClassifierCV)
                     try:
-                        base_m = _tune_logistic(x[tr], y_all[tr], Cs, seed=model_seed + fold_i)
+                        base_m = tune_logistic_regression(x[tr], y_all[tr], Cs, seed=model_seed + fold_i)
                         cal = CalibratedClassifierCV(base_m, method="sigmoid", cv=3)
                         cal.fit(x[tr], y_all[tr])
                         scores_cal[("conf_consistency", fdef)][te] = cal.predict_proba(x[te])[:, 1]
@@ -614,7 +726,7 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
             s = scores[(method, fdef)]
             if not np.isfinite(s).all():
                 continue
-            cm = _cls_metrics(y, s)
+            cm = classification_metrics_from_scores(y, s)
             auprc_m, auprc_lo, auprc_hi = boot_ci(y, s, average_precision_score)
             auroc_m, auroc_lo, auroc_hi = boot_ci(y, s, roc_auc_score)
             cap = failure_capture_at_budget(s, y.astype(bool))
@@ -826,8 +938,8 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
         raw = np.column_stack(
             [conf_mat, feat_df[gap_cols_h].to_numpy(float) if gap_cols_h else np.zeros((n, 0))]
         )
-        x = _scale(raw, tr)
-        m = _tune_logistic(x[tr], y_perm[tr], Cs, seed=99)
+        x = standardize_features_with_train_stats(raw, tr)
+        m = tune_logistic_regression(x[tr], y_perm[tr], Cs, seed=99)
         perm_scores[te] = m.predict_proba(x[te])[:, 1]
     try:
         perm_auprc = float(average_precision_score(y_perm, perm_scores))
@@ -853,7 +965,7 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
             s = scores[key] if tag == "uncalibrated" else scores_cal.get(key, scores[key])
             if not np.isfinite(s).all():
                 continue
-            cm = _cls_metrics(y, s)
+            cm = classification_metrics_from_scores(y, s)
             cal_rows.append({"failure_def": fdef, "calibration": tag, **cm, "model_seed": model_seed})
 
     # Save tables
@@ -1362,7 +1474,7 @@ def expand_robustness_from_artifacts(config: dict[str, Any]) -> pd.DataFrame:
         for fold_i, parts in sorted(fold_map.items()):
             tr = parts["train"]
             te = parts["test"]
-            x = _scale(raw, tr)
+            x = standardize_features_with_train_stats(raw, tr)
             m = LogisticRegression(
                 C=1.0,
                 max_iter=2000,

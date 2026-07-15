@@ -1,4 +1,9 @@
-"""Sliding-window inference for full 3D volumes."""
+"""Sliding-window inference for full 3D volumes.
+
+Patches are extracted on a regular grid (stride from overlap), logits are
+accumulated into a full-volume sum and divided by a visit count map so
+overlapping patches contribute equally on average.
+"""
 
 from __future__ import annotations
 
@@ -38,26 +43,27 @@ def sliding_window_inference(
     if device is None:
         device = image.device
 
-    patch_size = tuple(int(s) for s in patch_size)
+    patch_size = tuple(int(size) for size in patch_size)
     image = image.unsqueeze(0).to(device)  # (1, C, D, H, W)
     _, _, depth, height, width = image.shape
 
-    stride = tuple(max(1, int(p * (1.0 - overlap))) for p in patch_size)
+    # Stride < patch size when overlap > 0 → denser patch grid.
+    stride = tuple(max(1, int(patch * (1.0 - overlap))) for patch in patch_size)
 
     logits_sum = torch.zeros((num_classes, depth, height, width), device=device)
-    count_map = torch.zeros((1, depth, height, width), device=device)
+    visit_count_map = torch.zeros((1, depth, height, width), device=device)
 
-    embeddings: list[torch.Tensor] = []
+    patch_embeddings: list[torch.Tensor] = []
     bottleneck_maps: list[torch.Tensor] = []
 
-    z_steps = _axis_steps(depth, patch_size[0], stride[0])
-    y_steps = _axis_steps(height, patch_size[1], stride[1])
-    x_steps = _axis_steps(width, patch_size[2], stride[2])
+    depth_starts = _axis_steps(depth, patch_size[0], stride[0])
+    height_starts = _axis_steps(height, patch_size[1], stride[1])
+    width_starts = _axis_steps(width, patch_size[2], stride[2])
 
-    # Collect patch predictions; tqdm gives progress on long validation runs.
-    total_patches = len(z_steps) * len(y_steps) * len(x_steps)
+    # Collect patch predictions; tqdm shows progress on long validation runs.
+    total_patches = len(depth_starts) * len(height_starts) * len(width_starts)
     patch_iter = tqdm(
-        _patch_indices(z_steps, y_steps, x_steps),
+        _patch_indices(depth_starts, height_starts, width_starts),
         total=total_patches,
         desc="Sliding-window inference",
         leave=False,
@@ -70,20 +76,20 @@ def sliding_window_inference(
             patch_logits, patch_embedding, patch_bottleneck = model(patch)
 
             # Valid region inside the volume (handles volumes smaller than patch).
-            valid_d = min(patch_size[0], depth - z0)
-            valid_h = min(patch_size[1], height - y0)
-            valid_w = min(patch_size[2], width - x0)
-            z1, y1, x1 = z0 + valid_d, y0 + valid_h, x0 + valid_w
+            valid_depth = min(patch_size[0], depth - z0)
+            valid_height = min(patch_size[1], height - y0)
+            valid_width = min(patch_size[2], width - x0)
+            z1, y1, x1 = z0 + valid_depth, y0 + valid_height, x0 + valid_width
 
             logits_sum[:, z0:z1, y0:y1, x0:x1] += patch_logits[
-                0, :, :valid_d, :valid_h, :valid_w
+                0, :, :valid_depth, :valid_height, :valid_width
             ]
-            count_map[:, z0:z1, y0:y1, x0:x1] += 1.0
-            embeddings.append(patch_embedding[0].cpu())
+            visit_count_map[:, z0:z1, y0:y1, x0:x1] += 1.0
+            patch_embeddings.append(patch_embedding[0].cpu())
             bottleneck_maps.append(patch_bottleneck[0].cpu())
 
-    logits = logits_sum / count_map.clamp_min(1.0)
-    embedding = torch.stack(embeddings, dim=0).mean(dim=0)
+    logits = logits_sum / visit_count_map.clamp_min(1.0)
+    embedding = torch.stack(patch_embeddings, dim=0).mean(dim=0)
     bottleneck = torch.stack(bottleneck_maps, dim=0).mean(dim=0)
     return logits, embedding, bottleneck
 

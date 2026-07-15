@@ -1,4 +1,14 @@
-"""Train a 3D U-Net to convergence with development-set early stopping."""
+"""Train a 3D U-Net to convergence with development-set early stopping.
+
+Split roles (shared across model seeds)
+---------------------------------------
+- train: patch sampling for SGD
+- development: lightweight sliding-window Dice for early stop / LR schedule
+- final evaluation: held out until downstream analysis (never used here)
+
+Checkpoints write under ``outputs_converged/seed_XXX/`` and must not touch
+``outputs_10hour/`` paper artifacts.
+"""
 
 from __future__ import annotations
 
@@ -246,9 +256,10 @@ class ConvergedTrainer:
         return float(self.optimizer.param_groups[0]["lr"])
 
     def _train_epoch(self, epoch: int) -> float:
+        """One SGD epoch over train patches; returns mean batch loss."""
         self.model.train()
-        running = 0.0
-        n = 0
+        running_loss = 0.0
+        n_batches = 0
         progress = tqdm(
             self.train_loader,
             desc=f"seed={self.model_seed} train epoch {epoch}",
@@ -258,6 +269,7 @@ class ConvergedTrainer:
             case_id = batch["case_id"][0] if isinstance(batch["case_id"], (list, tuple)) else batch["case_id"]
             if isinstance(case_id, (list, tuple)):
                 case_id = case_id[0]
+            # Hard guard: final-evaluation cohort must never appear in training.
             if str(case_id) in self.final_evaluation_set:
                 raise RuntimeError(f"Final-evaluation case loaded during training: {case_id}")
 
@@ -268,10 +280,10 @@ class ConvergedTrainer:
             loss = self.criterion(logits, targets)
             loss.backward()
             self.optimizer.step()
-            running += float(loss.item())
-            n += 1
+            running_loss += float(loss.item())
+            n_batches += 1
             progress.set_postfix(loss=f"{loss.item():.4f}")
-        return running / max(n, 1)
+        return running_loss / max(n_batches, 1)
 
     @torch.no_grad()
     def evaluate_development(self) -> dict[str, float]:
