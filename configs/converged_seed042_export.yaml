@@ -1,0 +1,41 @@
+# Seed-specific export/analysis config for converged U-Net seed 42.
+# Methodology matches configs/ten_hour.yaml; only paths/seed routing differ.
+# Does not write into outputs_10hour/.
+
+seed: 42
+
+data:
+  root: "outputs_converged/seed_042/analysis/stub_brats"
+  max_cases: null
+  val_fraction: 0.30
+  target_spacing: [2.0, 2.0, 2.0]
+  percentile_clip: [1.0, 99.0]
+  patch_size: [64, 64, 64]
+  patches_per_volume: 2
+  modalities: ["t1", "t1ce", "t2", "flair"]
+  preload: false
+  cache_dir: "outputs_10hour/cache"
+
+model:
+  in_channels: 4
+  num_classes: 4
+  base_features: 32
+  embedding_dim: 128
+
+training:
+  epochs: 1
+  batch_size: 1
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  dice_weight: 0.5
+  num_workers: 0
+  val_artifact_every: 1
+  checkpoint_every: 1
+
+output:
+  dir: "outputs_converged/seed_042/analysis"
+  checkpoint_dir: "outputs_converged/seed_042/checkpoints"
+
+inference:
+  overlap: 0.25
+  tta_augmentations: 8

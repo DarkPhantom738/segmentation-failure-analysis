@@ -1,5 +1,0 @@
-scope,dice_bin,n_cases,n_random_directions,mean_abs_volume_delta_probe,mean_abs_volume_delta_random,probe_to_random_abs_volume_ratio,probe_volume_percentile_vs_random,fraction_opposite_sign_actual_volume,fraction_opposite_sign_analytical_probe
-all,all,30,5,3.816666666666667,4.453333333333333,0.8570359281437127,0.47333333333333333,0.5666666666666667,1.0
-dice_bin,low,10,5,5.1,4.72,1.0805084745762712,0.53,0.8,1.0
-dice_bin,medium,10,5,3.3,5.08,0.6496062992125984,0.42000000000000004,0.5,1.0
-dice_bin,high,10,5,3.05,3.56,0.8567415730337078,0.47000000000000003,0.4,1.0

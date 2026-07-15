@@ -1,0 +1,86 @@
+# Confidence + consistency triage for converged seed 42 (paths only).
+seed: 42
+outer_folds: 5
+inner_folds: 4
+n_bootstrap: 5000
+model_seeds: [42]
+
+paths:
+  layer_index: "outputs_converged/seed_042/analysis/layer_embeddings/layer_embedding_index.csv"
+  failure_table: "outputs_converged/seed_042/analysis/failure_tables/failure_metrics.csv"
+  fold_assignments: "outputs_converged/seed_042/analysis/consistency/fold_assignments.csv"
+  confidence_features: "outputs_converged/seed_042/analysis/case_level_confidence_features.csv"
+  consistency_features: "outputs_converged/seed_042/analysis/consistency/case_level_features.csv"
+  output_dir: "outputs_converged/seed_042/analysis/confidence_consistency_triage"
+
+layers:
+  - encoder1
+  - encoder2
+  - encoder3
+  - encoder4
+  - bottleneck
+  - decoder4
+  - decoder3
+  - decoder2
+  - decoder1
+
+consistency_targets:
+  - log_wt_volume
+  - gt_edema_frac
+  - gt_enhancing_frac
+  - gt_necrosis_frac
+  - gt_compactness
+
+confidence_cols:
+  - conf_mean_maxprob_all
+  - conf_mean_maxprob_fg
+  - conf_mean_entropy_fg
+  - conf_mean_entropy_boundary
+  - conf_entropy_p95_boundary
+  - conf_mean_margin_all
+  - conf_mean_margin_fg
+  - conf_frac_maxprob_lt_0.60
+  - conf_frac_maxprob_lt_0.70
+  - conf_frac_maxprob_lt_0.80
+  - conf_frac_maxprob_lt_0.90
+  - conf_frac_margin_lt_0.10
+  - conf_frac_margin_lt_0.20
+
+morphology_cols:
+  - pred_tumor_volume
+  - pred_edema_volume
+  - pred_enhancing_volume
+  - pred_necrosis_volume
+  - out_log_wt_volume
+  - out_gt_edema_frac
+  - out_gt_enhancing_frac
+  - out_gt_necrosis_frac
+  - out_gt_compactness
+  - n_components
+  - surface_to_volume
+
+ridge_alphas: [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+logistic_C: [0.01, 0.1, 1.0, 10.0, 100.0]
+elasticnet_l1_ratios: [0.15, 0.5, 0.85]
+
+primary_targets:
+  - lowest20_mean_fg
+  - mean_fg_lt_0.70
+
+overwrite_output: false
+n_block_permutations: 50
+
+failure_defs:
+  - lowest20_mean_fg
+  - mean_fg_lt_0.80
+  - mean_fg_lt_0.70
+  - edema_lt_0.70
+  - lowest20_edema
+
+consistency_selection_modes:
+  - all
+  - absolute_only
+  - signed_only
+  - standardized_only
+  - one_per_target_abs
+  - elasticnet

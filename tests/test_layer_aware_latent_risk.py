@@ -26,7 +26,7 @@ def test_config_exists_and_loads():
     assert cfg["seed"] == 42
     assert cfg["outer_folds"] == 5
     assert cfg["inner_folds"] == 4
-    assert cfg["n_bootstrap"] == 5000
+    assert cfg["n_bootstrap"] == 2000
     assert len(cfg["layers"]) == 9
 
 

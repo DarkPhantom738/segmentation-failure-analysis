@@ -1,0 +1,94 @@
+# Confidence feature generation for converged seed 42 (paths only).
+seed: 42
+outer_folds: 5
+inner_folds: 4
+n_bootstrap: 2000
+seeds_sensitivity: [42, 123, 2026]
+default_stage: confidence
+
+paths:
+  train_config: "configs/converged_seed042_export.yaml"
+  checkpoint: "outputs_converged/seed_042/checkpoints/checkpoint_best.pt"
+  layer_index: "outputs_converged/seed_042/analysis/layer_embeddings/layer_embedding_index.csv"
+  failure_table: "outputs_converged/seed_042/analysis/failure_tables/failure_metrics.csv"
+  consistency_dir: "outputs_converged/seed_042/analysis/consistency"
+  fold_assignments: "outputs_converged/seed_042/analysis/consistency/fold_assignments.csv"
+  consistency_features: "outputs_converged/seed_042/analysis/consistency/case_level_features.csv"
+  data_root: "outputs_converged/seed_042/analysis/stub_brats"
+  cache_dir: "outputs_10hour/cache"
+  output_dir: "outputs_converged/seed_042/analysis"
+
+inference:
+  overlap: 0.25
+  patch_size: [64, 64, 64]
+  use_tta: true
+  tta_augmentations: 8
+  max_cases: null
+  # Exact match vs newly exported masks can fail on MPS non-determinism;
+  # features still come from this seed's current TTA probabilities.
+  require_exact_mask_match: false
+  resume: true
+
+layers:
+  - encoder1
+  - encoder2
+  - encoder3
+  - encoder4
+  - bottleneck
+  - decoder4
+  - decoder3
+  - decoder2
+  - decoder1
+
+encoder_layers: [encoder1, encoder2, encoder3, encoder4]
+decoder_layers: [decoder4, decoder3, decoder2, decoder1]
+
+pca_components: [8, 16, 32, 64]
+logistic_C: [0.01, 0.1, 1.0, 10.0, 100.0]
+logistic_penalty: ["l2", "elasticnet"]
+elasticnet_l1_ratios: [0.1, 0.5, 0.9]
+
+morphology_cols:
+  - pred_tumor_volume
+  - pred_edema_volume
+  - pred_enhancing_volume
+  - pred_necrosis_volume
+  - out_log_wt_volume
+  - out_gt_edema_frac
+  - out_gt_enhancing_frac
+  - out_gt_necrosis_frac
+  - out_gt_compactness
+  - n_components
+  - surface_to_volume
+
+quality_probe_cols:
+  - rep_dice
+  - rep_boundary_error_fraction
+
+inconsistency_prefixes:
+  - signed_gap_
+  - absolute_gap_
+  - standardized_gap_
+  - relative_gap_
+
+failure_defs:
+  - lowest20_mean_fg
+  - mean_fg_lt_0.80
+  - mean_fg_lt_0.70
+  - edema_lt_0.70
+  - lowest20_edema
+
+forbidden_gt_leak_cols:
+  - mean_entropy_error
+  - mean_entropy_nonerror
+  - entropy_error_auroc
+  - entropy_error_auprc
+  - overlap_top_5_uncertainty
+  - overlap_top_10_uncertainty
+  - overlap_top_20_uncertainty
+  - confident_false_negative_fraction
+  - false_positive_voxels
+  - false_negative_voxels
+  - missed_small_lesion_count
+  - boundary_error_fraction
+  - dice

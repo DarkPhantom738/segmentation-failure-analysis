@@ -4,29 +4,27 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![Dataset: BraTS](https://img.shields.io/badge/dataset-BraTS%202021-green.svg)](https://www.synapse.org/#!Synapse:syn27046444)
 
-This project studies the internal representations of a 3D U-Net for BraTS brain-tumor segmentation. Anatomical properties can often be decoded from those activations, but probe-derived edit directions did not consistently control or repair the final mask. What did help was measuring when the anatomy implied by a representation disagrees with the anatomy of the predicted mask, then combining those disagreements with ordinary inference-time confidence.
+This project studies a 3D U-Net for BraTS brain-tumor segmentation. Anatomical properties are often decodable from internal activations, but probe-derived edits did not reliably control the mask. What helps failure triage is combining ordinary inference-time **confidence** with **representation–output consistency** gaps (when anatomy implied by a hidden layer disagrees with anatomy measured from the predicted mask).
 
 Essentially, this project helps a brain-tumor segmentation model flag which of its predictions are most likely to need human review.
+
+Exploratory probing / editing / repair code lives under [`extra/`](extra/README.md) and is not required for the triage pipeline.
 
 ---
 
 ## Research questions
 
-**RQ1.** How closely are anatomical recoverability, functional dependence, and controllability related within a three-dimensional medical segmentation network?
+**RQ1 — Recoverability vs control.** How related are anatomical recoverability, functional dependence, and controllability in this network? (See `extra/`.)
 
-We test this with three complementary probes on the same frozen U-Net: fold-safe linear probing (can anatomy be read out?), spatial mean ablation (does the layer need intact spatial structure?), and probe-aligned editing with matched random controls (does a decoded direction selectively move the output?).
+**RQ2 — Reliability without control.** Can representation–output disagreement improve failure triage beyond confidence alone?
 
-**RQ2.** Even when decoded anatomical directions are unsuitable for controlling the output, can the underlying representation still contribute to reliability assessment?
-
-We hypothesized that disagreement between an anatomical property estimated from the hidden representation and the same property measured from the final mask could expose failures that conventional confidence does not capture. For example, the representation may indicate one tumor composition while the final segmentation expresses another, even when the output probabilities appear confident.
-
-The positive endpoint is **failure triage**: rank cases for human review using confidence plus representation–output consistency gaps, evaluated under nested cross-validation on 375 held-out cases.
+Positive endpoint: **failure triage** — rank cases for review using confidence + consistency, nested CV on **375** held-out cases.
 
 ---
 
 ## Main result
 
-On **375** BraTS 2021 validation cases. Primary endpoint: **lowest-quality 20%** by mean foreground Dice (77 positive cases). Evaluation: **nested CV** (5 outer / 4 inner folds, model seed 42) with **5000 paired case-level bootstrap** replicates. All methods share the same outer folds and failure labels.
+On **375** BraTS 2021 validation cases. Primary endpoint: **lowest-quality 20%** by mean foreground Dice. Nested CV (5 outer / 4 inner folds, model seed 42) with **5000** paired case-level bootstrap replicates.
 
 **Detecting the lowest-quality 20% of segmentations:**
 
@@ -46,71 +44,33 @@ On **375** BraTS 2021 validation cases. Primary endpoint: **lowest-quality 20%**
 | Mean Dice @ 80% coverage | +0.004 | [0.000, 0.009] | 98.2% |
 | AURC (lower is better) | −0.001 | [−0.008, +0.006] | 44.5% |
 
-**Secondary endpoint — mean foreground Dice &lt; 0.70** (73 cases):
+**Secondary endpoint — mean foreground Dice &lt; 0.70:**
 
 | Method | AUPRC |
 |---|---:|
 | Confidence only | 0.770 |
 | **Confidence + consistency** | **0.887** |
 
-Bootstrap vs confidence: ΔAUPRC **+0.115** [0.056, 0.185], P(better) **100%**; ΔCapture@20 **+0.096** [0.016, 0.183], P(better) **98.8%**.
+Bootstrap vs confidence: ΔAUPRC **+0.115** [0.056, 0.185]. Confidence + consistency wins **5/5** outer folds on both primary and secondary endpoints.
 
-**Stability:** confidence + consistency wins **5/5** outer folds on both primary and secondary endpoints. Classifier-only retrain across seeds 42 / 123 / 2026 gives identical held-out scores (features frozen).
+These are research quality-control metrics—not clinical benefit or deployment claims.
 
-**Where it helps less:** edema-specific labels (`edema_lt_0.70`: ΔAUPRC +0.006 vs confidence; `lowest20_edema`: proposed 0.779 vs confidence 0.794). Morphology-augmented confidence is often stronger there.
-
-
-Canonical numbers: `outputs_confidence_consistency_triage_20260712_030902/aggregate_metrics.csv`, `bootstrap_comparisons.csv`. Full baseline tables, ablations, and figures: `outputs_method_validation/validation_summary.md`.
-
----
-
-## What we compare against (baselines) and why
-
-The **primary baseline is confidence only**: case-level statistics derived from the model’s own **TTA-averaged softmax probabilities** on the predicted mask (8 flips, overlap 0.25). Features include foreground/boundary mean max-probability, predictive entropy, class-margin summaries, and low-confidence voxel fractions (`outputs_layer_aware_latent_risk/case_level_confidence_features.csv`).
-
-We use this baseline because it is the standard cheap signal available **at inference time** without ground truth: if the network’s probabilities are flat or contradictory, the case may need review. We call this **predictive entropy**, not epistemic uncertainty—no separate mutual-information estimate is used.
-
-**Augmented baselines** test whether consistency adds information beyond obvious alternatives:
-
-| Baseline | What it uses | Why include it |
-|---|---|---|
-| **Morphology only** | Tumor composition, volume, and shape measured from the **predicted** mask | Captures anatomically implausible outputs without internal representations |
-| **Confidence + morphology** | Both signal families | Strong composite QC baseline |
-| **Pooled representations** | Global-pooled activations from nine U-Net stages | Tests whether raw embeddings alone flag failures |
-| **Confidence + pooled** | Confidence + pooled reps | Representation-aware baseline without explicit consistency |
-| **Direct Dice probe** | Ridge probe predicting Dice from representations | Tests whether a single quality readout beats structured gaps |
-| **Consistency only** | Gap features without confidence | Shows gaps are not sufficient alone (AUPRC 0.725 primary) |
-
-The proposed method **augments** confidence with representation–output gaps; it does not replace confidence. Consistency-only underperforms confidence-only on the primary endpoint.
-
-**Feature ablation (primary endpoint):** removing enhancing-fraction gaps drops AUPRC from 0.886 to **0.773** (below confidence 0.805). Other anatomy families (edema, volume, necrosis, compactness) can be dropped with little or no loss—enhancing-composition disagreement carries most of the gain. (Will have to test further once I run on several seeds and test models till convergence rather than the current 5 epoch 10 hour model I am using currently.)
+Canonical committed tables: [`results/paper/triage_20260712/`](results/paper/triage_20260712/), [`results/paper/method_validation/`](results/paper/method_validation/).
 
 ---
 
 ## What representation–output consistency means
 
-For each anatomical property (for example enhancing-tumor fraction, edema fraction, or whole-tumor volume):
+For each anatomical property (e.g. enhancing-tumor fraction):
 
-1. Fit a Ridge probe on a hidden layer (using ground truth only inside the training fold).
-2. Read the same property from the **predicted** segmentation mask.
-3. Record how far the two disagree.
-4. Combine those gaps with confidence features (TTA max-probability, entropy, margin summaries, and related case-level statistics).
-5. Score case-level failure risk with a logistic model under nested CV.
+1. Fit a Ridge probe on a hidden layer (GT only inside the training fold).
+2. Read the same property from the **predicted** mask.
+3. Record the gap; combine with TTA confidence features.
+4. Score failure risk with logistic nested CV.
 
-Gap features (conceptual; code column names may differ):
+Inference-time triage does **not** take ground-truth masks as inputs. GT is used only to fit probes in training folds, define labels, and evaluate.
 
-```text
-signed_gap   = representation_estimate - predicted_mask_measurement
-absolute_gap = abs(representation_estimate - predicted_mask_measurement)
-relative_gap = abs(representation_estimate - predicted_mask_measurement)
-               / (abs(predicted_mask_measurement) + epsilon)
-```
-
-**Inference-time rule:** the triage score does not take ground-truth masks or GT-linked error maps as inputs. Ground truth is used only to fit probes inside training folds, define failure labels, and evaluate held-out performance.
-
-Refer to features as representation–output enhancing-fraction gaps, edema-fraction gaps, whole-tumor-volume gaps, and so on—even when code columns still use historical names.
-
-**What drives the signal:** held-out permutation importance ranks enhancing-fraction relative gaps first (mean AUPRC drop **0.257** when shuffled). Top correlations with mean foreground Dice include enhancing-fraction relative gap (ρ = −0.30) and boundary-complexity gaps (|ρ| ≈ 0.23–0.26). See `outputs_method_validation/feature_permutation_importance.csv` and `feature_outcome_correlations.csv`.
+Enhancing-fraction gaps carry most of the consistency gain (see `results/paper/method_validation/feature_permutation_importance.csv`).
 
 ---
 
@@ -119,127 +79,48 @@ Refer to features as representation–output enhancing-fraction gaps, edema-frac
 | Item | Setting |
 |---|---|
 | Dataset | BraTS 2021 |
-| Train / analysis split | 876 train / **375** internal validation |
+| Split | 876 train / **375** validation (`seed=42`, `val_fraction=0.30`) |
 | Inputs | T1, T1ce, T2, FLAIR |
 | Model | Four-class 3D U-Net |
-| Checkpoint | Epoch 5 from the ~10-hour training config (`configs/ten_hour.yaml`) |
-| Stages analyzed | encoder1–4, bottleneck, decoder4–1 (nine stages) |
+| Paper checkpoint | Epoch 5 (`configs/ten_hour.yaml`) |
+| Converged multi-seed | `configs/converged_unet.yaml` + `train_converged.py` |
 
-Four connected analyses on the same frozen model:
-
-1. **Layer-wise linear probing** — full-cohort out-of-fold Ridge recoverability.
-2. **Spatial mean ablation** — replace each layer map with its channel means; score Dice drop vs a matched sliding-window baseline.
-3. **Probe-aligned editing** — add scaled probe directions; compare to matched random directions (exploratory **30-case** screens, plus full-cohort edit summaries).
-4. **Confidence-augmented failure triage** — consistency gaps + confidence under leakage-safe nested CV (**375** cases).
-
-Train/val provenance: `docs/manuscript/environment_and_split.md`.
-
----
-
-## Mechanistic companion findings
-
-Decode ≠ control, although this is already a known concept, it is still a novel finding that wasn't found in UNET/medical imaging in general.
-
-### Full-cohort probe R² (375 cases, 5-fold OOF)
-
-Source: `outputs_10hour/layer_analysis/layer_recoverability.csv`
-
-| Property | Best layer | R² |
-|---|---|---:|
-| Whole-tumor volume (voxel count) | decoder2 | 0.822 |
-| Enhancing-tumor fraction | decoder1 | 0.647 |
-| Edema fraction | decoder1 | 0.596 |
-| Dice | decoder1 | 0.565 |
-| Necrotic / nonenhancing fraction | decoder1 | 0.525 |
-| Boundary complexity | decoder2 | 0.430 |
-| Boundary error | decoder1 | 0.415 |
-
-The locked-holdout heatmap below uses a **separate** selection/test split, so its R² values are **not** the same estimates as this table.
-
-### Editing (screens + full cohort)
-
-Matched-random screens (n = 30 each; exploratory, not powered tests):
-
-- Edema @ decoder1: probe / random absolute response ratio **2.36** (weak probe-specific steering).
-- Whole-tumor volume @ decoder2: probe / random ratio **0.86**—strongly decodable, but the probe direction did not beat random for changing measured volume. Analytical Ridge movement (+α/−α opposite sign) was far more consistent than actual segmentation volume flips.
-
-Full-cohort edema edits were small and monotonic; Dice barely moved. Editing is not a repair method here.
-
-### Mean ablation (375 cases, matched baseline)
-
-Dice degradation under spatial mean replacement:
-
-| Layer | Mean Dice degradation |
-|---|---:|
-| decoder1 | 0.889 |
-| encoder1 | 0.498 |
-| decoder2 | 0.399 |
-| bottleneck | ≈ 0 |
-
-Spatial organization at the bottleneck was relatively insensitive to mean replacement under this intervention. That does **not** mean the bottleneck is unnecessary for the network as a whole.
-
-Source: `outputs_10hour/layer_interventions/matched_baseline/baseline_comparison.csv`.
-
----
-
-## Why this matters
-
-Internal maps can encode anatomy. That does not automatically give a handle for reliable control or automatic correction. The same encoding can still be useful for monitoring: when the representation’s anatomical story disagrees with the mask the network emits, that mismatch adds information beyond confidence for spotting **overall** bad cases that may need review.
+Split / environment notes: [`docs/manuscript/environment_and_split.md`](docs/manuscript/environment_and_split.md).
 
 ---
 
 ## Figures
 
-**1. Layer recoverability (locked holdout)** — different split than the full-cohort table above.
+**Failure-triage precision–recall** (canonical nested run):
 
-![Locked-holdout recoverability heatmap](outputs_10hour/layer_holdout_recoverability/figures/heatmap_locked_r2.png)
+![Precision–recall curves](results/paper/triage_20260712/figures/precision_recall_curves.png)
 
-**2. Whole-tumor volume: analytical probe response vs actual mask volume** (30-case screen).
+**Failure capture vs review budget:**
 
-![Analytical vs actual volume](outputs_10hour/volume_probe_screen/figures/analytical_vs_actual_volume.png)
-
-**3. Failure-triage precision–recall** (canonical nested run).
-
-![Precision–recall curves](outputs_confidence_consistency_triage_20260712_030902/figures/precision_recall_curves.png)
-
-**4. Failure capture vs review budget.**
-
-![Failure capture curves](outputs_method_validation/figures/failure_capture_curves.png)
+![Failure capture curves](results/paper/method_validation/figures/failure_capture_curves.png)
 
 ---
 
 ## Repository structure
 
 ```text
-configs/
-  ten_hour.yaml
-  confidence_consistency_triage.yaml
-  method_validation.yaml
-  consistency_failure_detection.yaml
-  layer_aware_latent_risk.yaml
-src/
-  data/                 # BraTS loading / preprocessing
-  models/               # 3D U-Net (+ exploratory repair modules)
-  analysis/             # probing, editing, consistency, triage
-outputs_10hour/
-  layer_analysis/
-  layer_holdout_recoverability/
-  layer_interventions/
-  representation_editing/
-  edema_probe_screen/
-  volume_probe_screen/
-  failure_tables/
-outputs_confidence_consistency_triage/
-outputs_confidence_consistency_triage_20260712_030902/   # preferred canonical triage
-outputs_method_validation/
-outputs_layer_aware_latent_risk/                         # confidence CSV
-outputs_consistency_failure_detection/
-docs/
-  manuscript/environment_and_split.md
-  reporting_notes.md
+configs/                 # Core YAML (train, confidence, consistency, triage, validation, converged)
+src/                     # Library: data, models, training, analysis
+scripts/                 # Core CLIs + orchestration
+  run_paper_pipeline.sh
+  run_converged_seeds.sh
+  run_seed_downstream.sh
+train.py
+train_converged.py
+analyze_failures.py
+export_layer_embeddings.py
+results/paper/           # Committed canonical metrics + figures
+extra/                   # RQ1 probing, editing, repair (optional)
+docs/manuscript/         # Split / environment notes
+tests/
 ```
 
-Large artifacts (raw BraTS volumes, checkpoints, probability maps, layer `.npy` embeddings) are **not** stored in Git.
+Large local artifacts (`outputs_*`, checkpoints, caches, embeddings) are **gitignored**. Keep them on disk for regeneration; they are not part of the GitHub tree.
 
 ---
 
@@ -249,122 +130,75 @@ Large artifacts (raw BraTS volumes, checkpoints, probability maps, layer `.npy` 
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-# Point data.root at your local BraTS tree in configs/ten_hour.yaml
+pip install -e ".[dev]"
+# or: pip install -r requirements.txt && pip install -e .
 ```
 
-### 2. Data and checkpoint
+### 2. Data and checkpoint (local)
 
-You need locally:
+- BraTS 2021 training tree (set `data.root` in config), and/or
+- Preprocessed cache at `outputs_10hour/cache/` (local)
+- Checkpoint: `outputs_10hour/checkpoints/checkpoint_latest.pt` (local, not in Git)
+- Case table snapshot: `results/paper/failure_metrics.csv`
 
-- BraTS 2021 training data;
-- epoch-5 / latest checkpoint under `outputs_10hour/checkpoints/` (not in Git);
-- `outputs_10hour/failure_tables/failure_metrics.csv` (committed) for case lists and paths.
-
-### 3. Representation extraction and probing
+### 3. Inspect committed results (no GPU)
 
 ```bash
-python export_layer_embeddings.py \
-  --config configs/ten_hour.yaml \
-  --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
-  --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
-  --output-dir outputs_10hour/layer_embeddings
-
-python analyze_layer_holdout_recoverability.py \
-  --layer-index outputs_10hour/layer_embeddings/layer_embedding_index.csv \
-  --failure-table outputs_10hour/failure_tables/failure_metrics.csv
-
-python learn_semantic_directions.py \
-  --config configs/ten_hour.yaml \
-  --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
-  --layer-index outputs_10hour/layer_embeddings/layer_embedding_index.csv \
-  --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
-  --output-dir outputs_10hour/semantic_directions
+ls results/paper/triage_20260712
+head results/paper/triage_20260712/aggregate_metrics.csv
+cat results/paper/method_validation/validation_summary.md
 ```
 
-### 4. Ablation and editing
+### 4. Regenerate paper triage (heavy)
 
 ```bash
-python analyze_representation_editing.py \
-  --config configs/ten_hour.yaml \
-  --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
-  --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
-  --directions-dir outputs_10hour/semantic_directions \
-  --output-dir outputs_10hour/representation_editing
-
-python analyze_edema_probe_screen.py \
-  --config configs/ten_hour.yaml \
-  --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
-  --failure-table outputs_10hour/failure_tables/failure_metrics.csv
-
-python analyze_volume_probe_screen.py \
-  --config configs/ten_hour.yaml \
-  --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
-  --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
-  --n-random 5
-
-python analyze_layer_interventions.py \
-  --config configs/ten_hour.yaml \
-  --data-root /path/to/BraTS2021_Training_Data \
-  --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
-  --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
-  --output-dir outputs_10hour/layer_interventions
-
-python analyze_layer_interventions.py \
-  --config configs/ten_hour.yaml \
-  --data-root /path/to/BraTS2021_Training_Data \
-  --checkpoint outputs_10hour/checkpoints/checkpoint_latest.pt \
-  --failure-table outputs_10hour/failure_tables/failure_metrics.csv \
-  --output-dir outputs_10hour/layer_interventions \
-  --recompute-matched-baseline
+bash scripts/run_paper_pipeline.sh
+# Skip TTA if metrics already exist:
+# SKIP_TTA=1 bash scripts/run_paper_pipeline.sh
 ```
 
-### 5. Confidence-feature generation
-
-Committed confidence table: `outputs_layer_aware_latent_risk/case_level_confidence_features.csv`.
-
-To regenerate (needs checkpoint + local volumes; GPU/CPU heavy):
+Or step by step:
 
 ```bash
 python scripts/run_layer_aware_latent_risk.py \
-  --config configs/layer_aware_latent_risk.yaml \
-  --stage confidence
-```
-
-### 6. Final confidence + consistency evaluation
-
-Committed results can be inspected without re-running:
-
-```bash
-ls outputs_confidence_consistency_triage_20260712_030902
-cat outputs_method_validation/validation_summary.md
-```
-
-To recompute (needs layer embeddings + feature tables; may write a timestamped sibling directory):
-
-```bash
+  --config configs/layer_aware_latent_risk.yaml --stage confidence
 python scripts/run_consistency_failure_detection.py \
   --config configs/consistency_failure_detection.yaml
-
 python scripts/run_confidence_consistency_triage.py \
   --config configs/confidence_consistency_triage.yaml
-
 python scripts/run_method_validation.py \
   --config configs/method_validation.yaml
 ```
+
+New runs write under local `outputs_*` (gitignored). Committed snapshot stays in `results/paper/`.
+
+### 5. Converged multi-seed training
+
+```bash
+# Train remaining seeds (skips any seed that already has convergence_summary.json)
+bash scripts/run_converged_seeds.sh
+
+# Or one seed:
+python train_converged.py --config configs/converged_unet.yaml --seed 123
+
+# After TTA export for a seed:
+bash scripts/run_seed_downstream.sh 123
+```
+
+### 6. Optional RQ1 / repair
+
+See [`extra/README.md`](extra/README.md).
 
 ---
 
 ## Limitations and intended use
 
-- One public dataset (BraTS 2021) and one U-Net in the main analysis.
+- One public dataset (BraTS 2021) and one U-Net family in the main analysis.
 - No external cohort; retrospective computational study only.
-- Limited benefit for edema-specific failure definitions.
+- Limited benefit for edema-specific failure definitions (`edema_lt_0.70`: ΔAUPRC +0.006 vs confidence).
 - Enhancing-fraction discrepancy features carry much of the consistency signal.
 - No supported improvement in risk–coverage AURC.
 - Representation editing did not provide automatic correction.
-
-
 
 ---
 

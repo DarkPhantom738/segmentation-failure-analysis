@@ -1,0 +1,49 @@
+# Five-seed training-to-convergence (shared patient splits; model seed varies)
+
+# Default model seed (override with --seed)
+seed: 42
+
+data:
+  # Prefer preprocessed cache; nifti root only needed when a case is not cached.
+  root: "data/BraTS2021_Training"
+  cache_dir: "outputs_10hour/cache"
+  max_cases: null
+  modalities: ["t1", "t1ce", "t2", "flair"]
+  target_spacing: [2.0, 2.0, 2.0]
+  percentile_clip: [1.0, 99.0]
+  patch_size: [64, 64, 64]
+  patches_per_volume: 2
+  preload: false
+  data_split_seed: 42
+  development_split_seed: 31415
+  final_validation_fraction: 0.30
+  development_fraction_of_training_pool: 0.10
+
+model:
+  in_channels: 4
+  num_classes: 4
+  base_features: 32
+  embedding_dim: 128
+
+training:
+  max_epochs: 100
+  batch_size: 1
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  dice_weight: 0.5
+  num_workers: 0
+  validate_every: 5
+  early_stopping_patience: 4
+  early_stopping_min_delta: 0.001
+  scheduler:
+    mode: max
+    factor: 0.5
+    patience: 2
+    min_lr: 0.000001
+
+inference:
+  overlap: 0.25
+
+output:
+  root: "outputs_converged"
+  shared_split_dir: "outputs_converged/shared_split"
