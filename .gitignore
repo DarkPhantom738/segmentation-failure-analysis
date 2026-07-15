@@ -9,7 +9,8 @@ dist/
 build/
 
 # Data (repo-root BraTS/cache only; do not ignore src/data/)
-/data/
+/data/**
+!/data/README.md
 
 # All experiment output trees (local regenerable / bulky)
 outputs/

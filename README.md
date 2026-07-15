@@ -101,26 +101,74 @@ Split / environment notes: [`docs/manuscript/environment_and_split.md`](docs/man
 
 ---
 
+## Documentation map (start here to navigate the repo)
+
+Each major folder has its own **README** with file-by-file roles, reading order, and roadmap. You should not need to open modules at random.
+
+| Path | What the folder README covers |
+|---|---|
+| [`docs/README.md`](docs/README.md) | Reviewer reading order; links to the pipeline narrative |
+| [`docs/paper_pipeline.md`](docs/paper_pipeline.md) | Stage-by-stage regeneration path, leakage rules, committed vs local outputs |
+| [`docs/manuscript/README.md`](docs/manuscript/README.md) | Verified split / environment notes for the manuscript |
+| [`configs/README.md`](configs/README.md) | Every YAML: which CLI uses it, what it knobs, path conventions |
+| [`scripts/README.md`](scripts/README.md) | Orchestrators + stage CLIs in paper vs converged order |
+| [`src/README.md`](src/README.md) | Package map + dependency direction |
+| [`src/data/README.md`](src/data/README.md) | BraTS I/O, preprocessing, paper vs converged splits |
+| [`src/models/README.md`](src/models/README.md) | U-Net + optional repair modules |
+| [`src/training/README.md`](src/training/README.md) | Train loops, sliding-window, TTA, specialty inference |
+| [`src/analysis/README.md`](src/analysis/README.md) | Confidence → consistency → triage → validation (+ RQ1 helpers) |
+| [`src/utils/README.md`](src/utils/README.md) | Seeds / I/O helpers |
+| [`results/README.md`](results/README.md) | Why only `paper/` is committed |
+| [`results/paper/README.md`](results/paper/README.md) | Snapshot layout; links into triage / validation / consistency |
+| [`tests/README.md`](tests/README.md) | What pytest covers (and what it does not) |
+| [`data/README.md`](data/README.md) | Expected BraTS on-disk layout (data itself not in git) |
+| [`extra/README.md`](extra/README.md) | Optional RQ1 / repair tree (with its own subfolder READMEs) |
+
+**Suggested first pass for a new reader**
+
+1. This README (claim + table + limitations).
+2. [`docs/paper_pipeline.md`](docs/paper_pipeline.md) (how stages connect).
+3. [`results/paper/README.md`](results/paper/README.md) → `triage_20260712/` → `method_validation/` (inspect numbers).
+4. [`scripts/README.md`](scripts/README.md) + [`configs/README.md`](configs/README.md) (how to regenerate).
+5. [`src/analysis/README.md`](src/analysis/README.md) only when you need implementation detail.
+
+---
+
 ## Repository structure
 
 ```text
-configs/                 # Core YAML (train, confidence, consistency, triage, validation, converged)
-src/                     # Library: data, models, training, analysis
-scripts/                 # Core CLIs + orchestration
-  run_paper_pipeline.sh
-  run_converged_seeds.sh
-  run_seed_downstream.sh
-train.py
-train_converged.py
-analyze_failures.py
-export_layer_embeddings.py
-results/paper/           # Committed canonical metrics + figures
-extra/                   # RQ1 probing, editing, repair (optional)
-docs/manuscript/         # Split / environment notes
-tests/
+README.md                 # This file: claim, results, reproduction, doc map
+train.py                  # Original U-Net train / TTA export entry
+train_converged.py        # Converged multi-seed training entry
+analyze_failures.py       # Build failure_metrics.csv from TTA metrics
+export_layer_embeddings.py# Globally pooled layer activations
+pyproject.toml            # Editable install + dependencies
+requirements.txt          # Alternate dependency pin list
+
+configs/                  # YAML — see configs/README.md
+scripts/                  # CLIs + bash orchestrators — see scripts/README.md
+src/                      # Library — see src/README.md and src/*/README.md
+  data/ models/ training/ analysis/ utils/
+results/                  # Committed snapshots — see results/README.md
+  paper/                  # Canonical tables/figures — see results/paper/README.md
+docs/                     # Human guides — see docs/README.md
+tests/                    # Pytest — see tests/README.md
+extra/                    # RQ1 / repair (optional) — see extra/README.md
+data/                     # Local BraTS (not in git) — see data/README.md
 ```
 
 Large local artifacts (`outputs_*`, checkpoints, caches, embeddings) are **gitignored**. Keep them on disk for regeneration; they are not part of the GitHub tree.
+
+### Project roadmap (research / engineering)
+
+| Status | Item |
+|---|---|
+| Done | Epoch-5 confidence + consistency triage; committed `results/paper/` snapshot |
+| Done | Repo layout with per-folder READMEs for navigability |
+| Active | Converged multi-seed training + per-seed downstream (`scripts/run_converged_seeds.sh`, `run_seed_downstream.sh`) |
+| Next | Finish remaining seeds; multi-seed meta-summary of triage metrics |
+| Optional | RQ1 / repair under `extra/` for manuscript background—not the primary endpoint |
+| Non-goals | Silent algorithm changes for “cleaner” libraries; committing full `outputs_*` trees |
 
 ---
 
