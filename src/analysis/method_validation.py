@@ -276,8 +276,20 @@ def run_validation(config: dict[str, Any]) -> dict[str, Any]:
     folds_df = pd.read_csv(triage_dir / "fold_assignments.csv")
     fold_metrics = pd.read_csv(triage_dir / "fold_metrics.csv")
     sel_log = pd.read_csv(triage_dir / "selection_log.csv")
-    cons_outer = pd.read_csv(CONSISTENCY_OUTER)
-    cons_feat = pd.read_csv(CONSISTENCY_FEATURES)
+    paths_cfg = config.get("paths", {})
+    cons_feat_path = Path(paths_cfg.get("consistency_features", CONSISTENCY_FEATURES))
+    cons_outer_path = Path(
+        paths_cfg.get(
+            "consistency_outer_predictions",
+            cons_feat_path.parent / "outer_fold_predictions.csv",
+        )
+    )
+    if not cons_feat_path.exists() and CONSISTENCY_FEATURES.exists():
+        cons_feat_path = CONSISTENCY_FEATURES
+    if not cons_outer_path.exists() and CONSISTENCY_OUTER.exists():
+        cons_outer_path = CONSISTENCY_OUTER
+    cons_outer = pd.read_csv(cons_outer_path)
+    cons_feat = pd.read_csv(cons_feat_path)
 
     case_order = sorted(pred["case_id"].tolist())
     pred = pred.set_index("case_id").loc[case_order].reset_index()
@@ -566,6 +578,7 @@ def run_validation(config: dict[str, Any]) -> dict[str, Any]:
     # ---- Summary markdown ----
     verdict = _write_summary(
         out_dir,
+        triage_dir,
         baseline_df,
         abl_df,
         imp_df,
@@ -841,6 +854,7 @@ def _capture_at(scores: np.ndarray, y: np.ndarray, budget: float) -> float:
 
 def _write_summary(
     out_dir: Path,
+    triage_dir: Path,
     baseline_df: pd.DataFrame,
     abl_df: pd.DataFrame,
     imp_df: pd.DataFrame,
@@ -897,7 +911,7 @@ def _write_summary(
         "# Method validation summary",
         "",
         f"**Algorithm:** frozen confidence + representation–output consistency  ",
-        f"**Canonical triage artifacts:** `{CANONICAL_TRIAGE}`  ",
+        f"**Triage artifacts:** `{triage_dir}`  ",
         f"**Verdict: {verdict}**",
         "",
         "No U-Net retraining. No probe/edit/repair regeneration. Classifier-only "
@@ -908,7 +922,7 @@ def _write_summary(
         "",
         "## 1. Complete baseline comparison",
         "",
-        "Identical outer folds (seed 42, 5×75). Metrics from frozen held-out "
+        "Identical outer folds from the triage run. Metrics from frozen held-out "
         "scores where available; `dice_probe` / `pooled` scores reused from the "
         "consistency experiment on the same folds (fail labels agree).",
         "",

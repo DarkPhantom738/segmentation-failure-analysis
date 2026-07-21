@@ -1,6 +1,9 @@
 # Seed-specific export/analysis config for converged U-Net seed 42.
 # Methodology matches configs/ten_hour.yaml; only paths/seed routing differ.
 # Does not write into outputs_10hour/.
+#
+# IMPORTANT: patient split is pinned to the shared final-evaluation cohort.
+# Model seed may change per converged seed; data_split_seed / case list must not.
 
 seed: 42
 
@@ -8,6 +11,9 @@ data:
   root: "outputs_converged/seed_042/analysis/stub_brats"
   max_cases: null
   val_fraction: 0.30
+  # Pin the evaluation cohort for every model seed (do not retarget these).
+  data_split_seed: 42
+  final_evaluation_cases: "outputs_converged/shared_split/final_evaluation_cases.json"
   target_spacing: [2.0, 2.0, 2.0]
   percentile_clip: [1.0, 99.0]
   patch_size: [64, 64, 64]

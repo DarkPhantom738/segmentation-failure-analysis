@@ -123,17 +123,22 @@ def tune_logistic_regression(
 ) -> LogisticRegression:
     """Pick C (and optional elastic-net) by inner stratified AUPRC, then refit."""
     labels_train = labels_train.astype(int)
-    # sklearn>=1.8: pass l1_ratio even for L2 (0.0) when using solver="saga".
-    model_kwargs: dict[str, Any] = {
-        "max_iter": 5000,
-        "class_weight": "balanced",
-        "random_state": seed,
-        "solver": "saga",
-    }
     if penalty == "elasticnet":
-        model_kwargs["l1_ratio"] = float(l1_ratio)
+        model_kwargs: dict[str, Any] = {
+            "solver": "saga",
+            "l1_ratio": float(l1_ratio),
+            "max_iter": 30000,
+            "tol": 1e-3,
+            "class_weight": "balanced",
+            "random_state": seed,
+        }
     else:
-        model_kwargs["l1_ratio"] = 0.0  # pure L2
+        model_kwargs = {
+            "solver": "lbfgs",
+            "l1_ratio": 0.0,
+            "max_iter": 10000,
+            "class_weight": "balanced",
+        }
 
     n_positive = int(labels_train.sum())
     n_negative = int(len(labels_train) - n_positive)
@@ -527,7 +532,21 @@ def run_triage(config: dict[str, Any], model_seed: int | None = None) -> dict[st
             + [f"out_{t}" for t in targets]
         )
 
-        mode_sets = consistency_feature_column_sets(gap_names, targets)
+        all_mode_sets = consistency_feature_column_sets(gap_names, targets)
+        requested_modes = config.get("consistency_selection_modes")
+        if requested_modes:
+            mode_sets = {
+                mode: all_mode_sets[mode]
+                for mode in requested_modes
+                if mode in all_mode_sets
+            }
+            if not mode_sets:
+                raise ValueError(
+                    "consistency_selection_modes did not match any known modes: "
+                    f"{requested_modes}"
+                )
+        else:
+            mode_sets = all_mode_sets
         # Build mode matrices from gaps only for selection (compact)
         x_by_mode = {
             mode: np.column_stack([fold_gaps[c] for c in cols]) if cols else np.zeros((n, 0))

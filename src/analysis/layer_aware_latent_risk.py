@@ -200,6 +200,51 @@ def confidence_from_probabilities(
     return out
 
 
+def resolve_saved_tta_probability_path(
+    *,
+    case_id: str,
+    path_prediction: str | Path,
+    metrics_lookup: dict[str, str] | None = None,
+    explicit_path: str | Path | None = None,
+) -> Path:
+    """Locate TTA softmax volumes written by ``train.py --export-tta``."""
+    if explicit_path is not None and str(explicit_path).strip():
+        return Path(explicit_path)
+    if metrics_lookup and case_id in metrics_lookup:
+        return Path(metrics_lookup[case_id])
+
+    pred = Path(path_prediction)
+    replaced = str(pred).replace("/predictions/", "/probabilities_tta/")
+    replaced = replaced.replace("\\predictions\\", "\\probabilities_tta\\")
+    candidate = Path(replaced)
+    if candidate.name.endswith("_pred_tta.npy"):
+        candidate = candidate.with_name(
+            candidate.name.replace("_pred_tta.npy", "_probs_tta.npy")
+        )
+    if candidate.exists():
+        return candidate
+    raise FileNotFoundError(
+        f"No saved TTA probabilities for {case_id}. "
+        f"Tried metrics lookup and derived path {candidate} from {pred}."
+    )
+
+
+def _load_tta_probability_lookup(config: dict[str, Any]) -> dict[str, str]:
+    metrics_path = config.get("paths", {}).get("metrics")
+    if not metrics_path:
+        return {}
+    path = Path(metrics_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Configured metrics CSV missing: {path}")
+    metrics_df = pd.read_csv(path)
+    if "path_tta_probability" not in metrics_df.columns:
+        raise ValueError(f"{path} lacks path_tta_probability column")
+    return {
+        str(row["case_id"]): str(row["path_tta_probability"])
+        for _, row in metrics_df.iterrows()
+    }
+
+
 def generate_confidence_features(
     config: dict[str, Any],
     *,
@@ -207,22 +252,16 @@ def generate_confidence_features(
     device: Any = None,
 ) -> pd.DataFrame:
     """
-    Frozen TTA sliding-window inference → compact GT-free confidence CSV.
+    Compact GT-free confidence CSV from TTA softmax + retained hard masks.
+
+    By default re-runs frozen TTA sliding-window inference. Set
+    ``inference.use_saved_probabilities: true`` to load volumes already written
+    by ``train.py --export-tta`` (same features; no re-inference).
 
     Critical: argmax masks are compared to retained hard predictions
     (`path_prediction`, typically *_pred_tta.npy). Full prob/entropy volumes
-    are never written.
+    are never written by this stage.
     """
-    import torch
-
-    from src.data.brats_dataset import load_case_cached
-    from src.models.unet3d import build_model
-    from src.training.tta import (
-        tta_predict_probabilities,
-        tta_predict_segmentation,
-        tta_sliding_window_inference,
-    )
-
     out_dir = ensure_dir(Path(config["paths"]["output_dir"]))
     out_csv = out_dir / "case_level_confidence_features.csv"
     mismatch_csv = out_dir / "confidence_mask_mismatch_report.csv"
@@ -233,50 +272,15 @@ def generate_confidence_features(
     if max_cases is not None and int(max_cases) > 0:
         failure_df = failure_df.head(int(max_cases))
 
-    # Prefer preprocessing settings embedded in the checkpoint for fidelity.
-    ckpt_path = Path(config["paths"]["checkpoint"])
-    ckpt_cpu = torch.load(ckpt_path, map_location="cpu")
-    train_cfg = dict(ckpt_cpu.get("config") or {})
-    if not train_cfg:
-        with open(config["paths"]["train_config"]) as f:
-            train_cfg = yaml.safe_load(f)
-
-    data_root = Path(config["paths"].get("data_root", train_cfg["data"]["root"]))
-    # Prefer local data root if configured and present; cache is keyed by preprocess params.
-    if not data_root.exists():
-        alt = Path("data/BraTS2021_Training")
-        if alt.exists():
-            data_root = alt
-    cache_dir = Path(
-        config["paths"].get("cache_dir")
-        or train_cfg.get("data", {}).get("cache_dir")
-        or "outputs_10hour/cache"
-    )
-    data_cfg = train_cfg["data"]
-
     inf_cfg = config.get("inference", {})
+    use_saved = bool(inf_cfg.get("use_saved_probabilities", False))
     use_tta = bool(inf_cfg.get("use_tta", True))
     n_tta = int(inf_cfg.get("tta_augmentations", 8))
     overlap = float(inf_cfg.get("overlap", 0.25))
-    patch_size = tuple(inf_cfg.get("patch_size", data_cfg["patch_size"]))
     require_exact = bool(inf_cfg.get("require_exact_mask_match", True))
     resume = bool(inf_cfg.get("resume", True))
+    expected_mode = "saved_tta_probabilities" if use_saved else ("tta" if use_tta else "sliding_window")
 
-    if device is None:
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            device = torch.device("mps")
-        else:
-            device = torch.device("cpu")
-
-    model = build_model(train_cfg)
-    model.load_state_dict(ckpt_cpu["model_state_dict"])
-    model.to(device)
-    model.eval()
-    num_classes = int(train_cfg["model"]["num_classes"])
-
-    existing_df = None
     done_ids: set[str] = set()
     rows: list[dict[str, float | str | int | bool]] = []
     if resume and out_csv.exists():
@@ -285,6 +289,8 @@ def generate_confidence_features(
             done = existing_df[
                 existing_df["mask_exact_match"].astype(str).isin(["True", "true", "1"])
             ]
+            if "inference_mode" in done.columns:
+                done = done[done["inference_mode"].astype(str) == expected_mode]
             done_ids = set(done["case_id"].astype(str))
             rows = done.to_dict(orient="records")
         else:
@@ -292,16 +298,6 @@ def generate_confidence_features(
 
     mismatches: list[dict[str, float | str | int]] = []
     from tqdm import tqdm
-    import os
-
-    # Keep outer progress readable; silence nested TTA/sliding-window bars.
-    os.environ.setdefault("TQDM_DISABLE", "0")
-
-    print(
-        f"Confidence export: device={device}, tta={use_tta}×{n_tta}, "
-        f"overlap={overlap}, patch={patch_size}, data_root={data_root}, "
-        f"cache={cache_dir}, n_cases={len(failure_df)}, already_done={len(done_ids)}"
-    )
 
     pending = [
         rec
@@ -309,95 +305,223 @@ def generate_confidence_features(
         if str(rec["case_id"]) not in done_ids
     ]
 
-    for rec in tqdm(pending, desc="Confidence features"):
-        case_id = str(rec["case_id"])
+    if use_saved:
+        metrics_lookup = _load_tta_probability_lookup(config)
+        # Epoch metadata only (no model weights needed).
+        ckpt_path = Path(config["paths"]["checkpoint"])
+        checkpoint_epoch = -1
+        if ckpt_path.exists():
+            import torch
 
-        saved_pred_path = Path(rec["path_prediction"])
-        if not saved_pred_path.exists():
-            raise FileNotFoundError(f"Missing retained hard mask: {saved_pred_path}")
-        saved_pred = np.load(saved_pred_path).astype(np.uint8)
+            ckpt_cpu = torch.load(ckpt_path, map_location="cpu")
+            checkpoint_epoch = int(ckpt_cpu.get("epoch", -1))
 
-        image, _gt_unused = load_case_cached(
-            case_id=case_id,
-            data_root=data_root,
-            modalities=data_cfg["modalities"],
-            target_spacing=data_cfg["target_spacing"],
-            percentile_clip=data_cfg["percentile_clip"],
-            cache_dir=cache_dir,
+        print(
+            f"Confidence export: source=saved_tta_probabilities, "
+            f"n_cases={len(failure_df)}, already_done={len(done_ids)}, "
+            f"metrics_paths={len(metrics_lookup)}"
         )
-        del _gt_unused  # never use GT for confidence
 
-        image_t = torch.from_numpy(np.asarray(image)).float()
-        if use_tta:
-            mean_probs_t = tta_sliding_window_inference(
-                model=model,
-                image=image_t,
-                patch_size=patch_size,
-                num_classes=num_classes,
-                device=device,
-                overlap=overlap,
-                max_augmentations=n_tta,
+        for rec in tqdm(pending, desc="Confidence features (saved TTA)"):
+            case_id = str(rec["case_id"])
+            saved_pred_path = Path(rec["path_prediction"])
+            if not saved_pred_path.exists():
+                raise FileNotFoundError(f"Missing retained hard mask: {saved_pred_path}")
+            saved_pred = np.load(saved_pred_path).astype(np.uint8)
+
+            prob_path = resolve_saved_tta_probability_path(
+                case_id=case_id,
+                path_prediction=saved_pred_path,
+                metrics_lookup=metrics_lookup,
+                explicit_path=rec.get("path_tta_probability"),
             )
-            new_pred = tta_predict_segmentation(mean_probs_t)
-            probs = tta_predict_probabilities(mean_probs_t)
-        else:
-            from src.training.inference import (
-                predict_probabilities,
-                predict_segmentation,
-                sliding_window_inference,
+            if not prob_path.exists():
+                raise FileNotFoundError(f"Missing saved TTA probabilities: {prob_path}")
+            probs = np.load(prob_path)
+            new_pred = np.argmax(probs, axis=0).astype(np.uint8)
+
+            if new_pred.shape != saved_pred.shape:
+                raise ValueError(
+                    f"{case_id}: shape mismatch probs-argmax {new_pred.shape} "
+                    f"vs saved {saved_pred.shape}"
+                )
+            n_disagree = int(np.sum(new_pred != saved_pred))
+            agree_frac = float(np.mean(new_pred == saved_pred))
+            exact = n_disagree == 0
+
+            row: dict[str, float | str | int | bool] = {
+                "case_id": case_id,
+                "inference_mode": "saved_tta_probabilities",
+                "tta_augmentations": n_tta if use_tta else 0,
+                "overlap": overlap,
+                "checkpoint_epoch": checkpoint_epoch,
+                "path_saved_prediction": str(saved_pred_path),
+                "path_saved_tta_probability": str(prob_path),
+                "mask_exact_match": exact,
+                "mask_agree_fraction": agree_frac,
+                "mask_n_disagree_voxels": n_disagree,
+                "mask_usable_with_old_dice": exact if require_exact else agree_frac > 0.999,
+            }
+
+            if exact or not require_exact:
+                pred_for_conf = saved_pred if exact else new_pred
+                row.update(compact_confidence_from_probabilities(probs, pred_for_conf))
+            else:
+                mismatches.append(
+                    {
+                        "case_id": case_id,
+                        "n_disagree": n_disagree,
+                        "agree_fraction": agree_frac,
+                        "path_saved_prediction": str(saved_pred_path),
+                        "path_saved_tta_probability": str(prob_path),
+                    }
+                )
+
+            rows.append(row)
+            pd.DataFrame(rows).sort_values("case_id").to_csv(out_csv, index=False)
+            del probs
+    else:
+        import torch
+
+        from src.data.brats_dataset import load_case_cached
+        from src.models.unet3d import build_model
+        from src.training.tta import (
+            tta_predict_probabilities,
+            tta_predict_segmentation,
+            tta_sliding_window_inference,
+        )
+
+        # Prefer preprocessing settings embedded in the checkpoint for fidelity.
+        ckpt_path = Path(config["paths"]["checkpoint"])
+        ckpt_cpu = torch.load(ckpt_path, map_location="cpu")
+        train_cfg = dict(ckpt_cpu.get("config") or {})
+        if not train_cfg:
+            with open(config["paths"]["train_config"]) as f:
+                train_cfg = yaml.safe_load(f)
+
+        data_root = Path(config["paths"].get("data_root", train_cfg["data"]["root"]))
+        # Prefer local data root if configured and present; cache is keyed by preprocess params.
+        if not data_root.exists():
+            alt = Path("data/BraTS2021_Training")
+            if alt.exists():
+                data_root = alt
+        cache_dir = Path(
+            config["paths"].get("cache_dir")
+            or train_cfg.get("data", {}).get("cache_dir")
+            or "outputs_10hour/cache"
+        )
+        data_cfg = train_cfg["data"]
+        patch_size = tuple(inf_cfg.get("patch_size", data_cfg["patch_size"]))
+
+        if device is None:
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = torch.device("mps")
+            else:
+                device = torch.device("cpu")
+
+        model = build_model(train_cfg)
+        model.load_state_dict(ckpt_cpu["model_state_dict"])
+        model.to(device)
+        model.eval()
+        num_classes = int(train_cfg["model"]["num_classes"])
+
+        print(
+            f"Confidence export: device={device}, tta={use_tta}×{n_tta}, "
+            f"overlap={overlap}, patch={patch_size}, data_root={data_root}, "
+            f"cache={cache_dir}, n_cases={len(failure_df)}, already_done={len(done_ids)}"
+        )
+
+        for rec in tqdm(pending, desc="Confidence features"):
+            case_id = str(rec["case_id"])
+
+            saved_pred_path = Path(rec["path_prediction"])
+            if not saved_pred_path.exists():
+                raise FileNotFoundError(f"Missing retained hard mask: {saved_pred_path}")
+            saved_pred = np.load(saved_pred_path).astype(np.uint8)
+
+            image, _gt_unused = load_case_cached(
+                case_id=case_id,
+                data_root=data_root,
+                modalities=data_cfg["modalities"],
+                target_spacing=data_cfg["target_spacing"],
+                percentile_clip=data_cfg["percentile_clip"],
+                cache_dir=cache_dir,
             )
+            del _gt_unused  # never use GT for confidence
 
-            logits, _, _ = sliding_window_inference(
-                model,
-                image_t,
-                patch_size=patch_size,
-                num_classes=num_classes,
-                overlap=overlap,
-                device=device,
-            )
-            new_pred = predict_segmentation(logits)
-            probs = predict_probabilities(logits)
+            image_t = torch.from_numpy(np.asarray(image)).float()
+            if use_tta:
+                mean_probs_t = tta_sliding_window_inference(
+                    model=model,
+                    image=image_t,
+                    patch_size=patch_size,
+                    num_classes=num_classes,
+                    device=device,
+                    overlap=overlap,
+                    max_augmentations=n_tta,
+                )
+                new_pred = tta_predict_segmentation(mean_probs_t)
+                probs = tta_predict_probabilities(mean_probs_t)
+            else:
+                from src.training.inference import (
+                    predict_probabilities,
+                    predict_segmentation,
+                    sliding_window_inference,
+                )
 
-        if new_pred.shape != saved_pred.shape:
-            raise ValueError(
-                f"{case_id}: shape mismatch new {new_pred.shape} vs saved {saved_pred.shape}"
-            )
-        n_disagree = int(np.sum(new_pred != saved_pred))
-        agree_frac = float(np.mean(new_pred == saved_pred))
-        exact = n_disagree == 0
+                logits, _, _ = sliding_window_inference(
+                    model,
+                    image_t,
+                    patch_size=patch_size,
+                    num_classes=num_classes,
+                    overlap=overlap,
+                    device=device,
+                )
+                new_pred = predict_segmentation(logits)
+                probs = predict_probabilities(logits)
 
-        row: dict[str, float | str | int | bool] = {
-            "case_id": case_id,
-            "inference_mode": "tta" if use_tta else "sliding_window",
-            "tta_augmentations": n_tta if use_tta else 0,
-            "overlap": overlap,
-            "checkpoint_epoch": int(ckpt_cpu.get("epoch", -1)),
-            "path_saved_prediction": str(saved_pred_path),
-            "mask_exact_match": exact,
-            "mask_agree_fraction": agree_frac,
-            "mask_n_disagree_voxels": n_disagree,
-            "mask_usable_with_old_dice": exact if require_exact else agree_frac > 0.999,
-        }
+            if new_pred.shape != saved_pred.shape:
+                raise ValueError(
+                    f"{case_id}: shape mismatch new {new_pred.shape} vs saved {saved_pred.shape}"
+                )
+            n_disagree = int(np.sum(new_pred != saved_pred))
+            agree_frac = float(np.mean(new_pred == saved_pred))
+            exact = n_disagree == 0
 
-        if exact or not require_exact:
-            pred_for_conf = saved_pred if exact else new_pred
-            row.update(compact_confidence_from_probabilities(probs, pred_for_conf))
-        else:
-            mismatches.append(
-                {
-                    "case_id": case_id,
-                    "n_disagree": n_disagree,
-                    "agree_fraction": agree_frac,
-                    "path_saved_prediction": str(saved_pred_path),
-                }
-            )
+            row = {
+                "case_id": case_id,
+                "inference_mode": "tta" if use_tta else "sliding_window",
+                "tta_augmentations": n_tta if use_tta else 0,
+                "overlap": overlap,
+                "checkpoint_epoch": int(ckpt_cpu.get("epoch", -1)),
+                "path_saved_prediction": str(saved_pred_path),
+                "mask_exact_match": exact,
+                "mask_agree_fraction": agree_frac,
+                "mask_n_disagree_voxels": n_disagree,
+                "mask_usable_with_old_dice": exact if require_exact else agree_frac > 0.999,
+            }
 
-        rows.append(row)
-        pd.DataFrame(rows).sort_values("case_id").to_csv(out_csv, index=False)
+            if exact or not require_exact:
+                pred_for_conf = saved_pred if exact else new_pred
+                row.update(compact_confidence_from_probabilities(probs, pred_for_conf))
+            else:
+                mismatches.append(
+                    {
+                        "case_id": case_id,
+                        "n_disagree": n_disagree,
+                        "agree_fraction": agree_frac,
+                        "path_saved_prediction": str(saved_pred_path),
+                    }
+                )
 
-        del probs, image, image_t
-        if use_tta:
-            del mean_probs_t
+            rows.append(row)
+            pd.DataFrame(rows).sort_values("case_id").to_csv(out_csv, index=False)
+
+            del probs, image, image_t
+            if use_tta:
+                del mean_probs_t
 
     conf_df = pd.DataFrame(rows).sort_values("case_id").reset_index(drop=True)
     conf_df.to_csv(out_csv, index=False)

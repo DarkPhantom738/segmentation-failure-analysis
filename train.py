@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import torch
@@ -23,6 +24,42 @@ from src.utils.seed import set_seed
 def load_config(config_path: Path) -> dict:
     with config_path.open("r") as handle:
         return yaml.safe_load(handle)
+
+
+def resolve_train_val_cases(
+    config: dict,
+    all_cases: list[str],
+) -> tuple[list[str], list[str]]:
+    """Resolve train/val case IDs for training or export.
+
+    Converged-seed exports must evaluate the *shared* final-evaluation cohort,
+    not a split derived from the model seed. Prefer an explicit case list when
+    provided; otherwise use ``data.data_split_seed`` (falling back to ``seed``).
+    """
+    data = config["data"]
+    case_list_path = data.get("final_evaluation_cases")
+    if case_list_path:
+        val_cases = [
+            str(case_id)
+            for case_id in json.loads(Path(case_list_path).read_text())
+        ]
+        available = set(all_cases)
+        missing = [case_id for case_id in val_cases if case_id not in available]
+        if missing:
+            raise FileNotFoundError(
+                f"{len(missing)} final-evaluation cases missing under data root "
+                f"(e.g. {missing[:3]})"
+            )
+        val_set = set(val_cases)
+        train_cases = sorted(case_id for case_id in all_cases if case_id not in val_set)
+        return train_cases, val_cases
+
+    split_seed = int(data.get("data_split_seed", config["seed"]))
+    return split_cases(
+        all_cases,
+        val_fraction=data["val_fraction"],
+        seed=split_seed,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,11 +121,7 @@ def main() -> None:
         discover_brats_cases(data_root),
         config["data"].get("max_cases"),
     )
-    train_cases, val_cases = split_cases(
-        all_cases,
-        val_fraction=config["data"]["val_fraction"],
-        seed=config["seed"],
-    )
+    train_cases, val_cases = resolve_train_val_cases(config, all_cases)
     print(f"Cases — train: {len(train_cases)}, val: {len(val_cases)}")
 
     train_loader, val_loader = build_dataloaders(config, train_cases, val_cases)

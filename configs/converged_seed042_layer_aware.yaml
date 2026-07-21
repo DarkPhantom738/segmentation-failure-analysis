@@ -11,6 +11,7 @@ paths:
   checkpoint: "outputs_converged/seed_042/checkpoints/checkpoint_best.pt"
   layer_index: "outputs_converged/seed_042/analysis/layer_embeddings/layer_embedding_index.csv"
   failure_table: "outputs_converged/seed_042/analysis/failure_tables/failure_metrics.csv"
+  metrics: "outputs_converged/seed_042/analysis/metrics_uncertainty.csv"
   consistency_dir: "outputs_converged/seed_042/analysis/consistency"
   fold_assignments: "outputs_converged/seed_042/analysis/consistency/fold_assignments.csv"
   consistency_features: "outputs_converged/seed_042/analysis/consistency/case_level_features.csv"
@@ -24,9 +25,11 @@ inference:
   use_tta: true
   tta_augmentations: 8
   max_cases: null
-  # Exact match vs newly exported masks can fail on MPS non-determinism;
-  # features still come from this seed's current TTA probabilities.
-  require_exact_mask_match: false
+  # Reuse TTA softmax volumes from train.py --export-tta (no re-inference).
+  use_saved_probabilities: true
+  # Cached probabilities and retained hard masks come from the same export, so
+  # any argmax mismatch is a consistency error and should stop pairing.
+  require_exact_mask_match: true
   resume: true
 
 layers:

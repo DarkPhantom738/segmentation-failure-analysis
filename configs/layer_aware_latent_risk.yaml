@@ -30,6 +30,9 @@ inference:
   use_tta: true
   tta_augmentations: 8
   max_cases: null
+  # If true, load path_tta_probability from paths.metrics (or derive from
+  # path_prediction) instead of re-running TTA sliding-window inference.
+  use_saved_probabilities: false
   # Require exact argmax match vs saved hard mask before pairing with old Dice.
   require_exact_mask_match: true
   resume: true  # skip cases already present in the confidence CSV

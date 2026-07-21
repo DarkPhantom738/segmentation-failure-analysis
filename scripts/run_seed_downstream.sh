@@ -25,9 +25,13 @@ CFG_DIR="${ANALYSIS}/configs"
 LOG="${ANALYSIS}/logs/downstream_chain.log"
 mkdir -p "$ANALYSIS/logs" "$CFG_DIR"
 
-# Emit seed-specific YAMLs from the seed-42 path templates (string retarget only).
+# Emit seed-specific YAMLs from the seed-42 path templates (path retarget only).
+# Keep the shared patient split pinned: never rewrite data_split_seed or the
+# final_evaluation_cases path when changing the model seed.
 python - <<PY
+import re
 from pathlib import Path
+
 seed = int("${SEED}")
 tag = "${TAG}"
 slug = "${SLUG}"
@@ -44,8 +48,8 @@ for src_name, dst_name in mapping.items():
     text = (src_root / src_name).read_text()
     text = text.replace("seed_042", tag)
     text = text.replace("seed042", slug)
-    # YAML scalar seed: 42 (and model_seeds lists containing 42)
-    text = text.replace("seed: 42", f"seed: {seed}")
+    # Top-level model/analysis seed only (do not touch data_split_seed: 42).
+    text = re.sub(r"(?m)^seed: 42\s*$", f"seed: {seed}", text)
     text = text.replace("model_seeds: [42]", f"model_seeds: [{seed}]")
     text = text.replace("model_seeds:\n- 42", f"model_seeds:\n- {seed}")
     text = text.replace("configs/converged_seed042_", f"{dst}/converged_{slug}_")
@@ -90,6 +94,28 @@ if [[ "$N" != "375" ]]; then
   echo "ERROR: expected 375 TTA metric rows, got $N"
   exit 1
 fi
+
+python - <<PY
+import json
+from pathlib import Path
+import pandas as pd
+
+metrics = Path("${ANALYSIS}/metrics_uncertainty.csv")
+final = {
+    str(x)
+    for x in json.loads(
+        Path("outputs_converged/shared_split/final_evaluation_cases.json").read_text()
+    )
+}
+ids = set(pd.read_csv(metrics)["case_id"].astype(str))
+overlap = len(ids & final)
+if ids != final:
+    raise SystemExit(
+        f"ERROR: TTA metrics are not the shared final-evaluation cohort "
+        f"(overlap={overlap}/375). Re-export with final_evaluation_cases pinned."
+    )
+print(f"TTA cohort matches shared final-evaluation set ({overlap}/375)")
+PY
 
 echo "=== analyze_failures.py ==="
 python analyze_failures.py \

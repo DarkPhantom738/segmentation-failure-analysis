@@ -146,9 +146,11 @@ Large local outputs such as checkpoints, cached volumes, and full prediction arr
 
 ---
 
-## Reproduction
+## Train and Test Pipeline
 
-Create the environment:
+End-to-end narrative with I/O tables: [`docs/paper_pipeline.md`](docs/paper_pipeline.md). Stage CLIs: [`scripts/README.md`](scripts/README.md).
+
+### 0. Environment and BraTS layout
 
 ```bash
 python -m venv .venv
@@ -156,26 +158,103 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Run the full paper pipeline, assuming BraTS data and the required checkpoint are available locally:
+Place BraTS 2021 under `data/BraTS2021_Training/` (see [`data/README.md`](data/README.md)):
+
+```text
+data/BraTS2021_Training/BraTS2021_XXXXX/
+  BraTS2021_XXXXX_{t1,t1ce,t2,flair,seg}.nii.gz
+```
+
+Default split (seed 42, `val_fraction=0.30`): **876 train / 375 validation**. The 375-case set is the evaluation cohort for TTA export, failure labels, and triage.
+
+```mermaid
+flowchart LR
+  A[BraTS 2021 on disk] --> B[Train U-Net]
+  B --> C[Checkpoint]
+  C --> D[TTA export on 375 val cases]
+  D --> E[Failure table + layer embeddings]
+  E --> F[Confidence features]
+  F --> G[Representation–output consistency]
+  G --> H[Nested-CV triage]
+  H --> I[Method validation / summary]
+```
+
+### 1. Train
+
+**Paper path (original 10-hour / epoch-5 setup)**
+
+```bash
+python train.py --config configs/ten_hour.yaml
+```
+
+Writes checkpoints under `outputs_10hour/`. This is the configuration behind the committed README tables (when paired with the epoch-5 analysis snapshot).
+
+**Converged multi-seed path (robustness track)**
+
+Uses a shared patient split; only the model seed changes. Development early-stopping lives inside the 876 train cases; the 375 final-evaluation cases stay fixed.
+
+```bash
+# all configured seeds
+bash scripts/run_converged_seeds.sh
+
+# or one seed
+python train_converged.py --config configs/converged_unet.yaml --seed 123
+```
+
+Artifacts land in `outputs_converged/seed_XXX/` (checkpoint, `convergence_summary.json`).
+
+### 2. Test / export (frozen inference on the 375-case cohort)
+
+After training (or from an existing checkpoint), export TTA predictions and uncertainty metrics. Do **not** retarget the patient split to the model seed: pin `data_split_seed` / `final_evaluation_cases` as in the converged export configs.
+
+```bash
+# paper checkpoint → outputs_10hour/
+python train.py --config configs/ten_hour.yaml --export-tta
+
+# converged seed example (use the seed’s export YAML after path retargeting)
+python train.py \
+  --config outputs_converged/seed_123/analysis/configs/converged_seed123_export.yaml \
+  --export-tta
+```
+
+Expected metrics file: `.../metrics_uncertainty.csv` with **375** rows on the shared final-evaluation cohort.
+
+### 3. Downstream failure-triage analysis
+
+**One-shot paper regeneration** (TTA → failures → embeddings → confidence → consistency → triage → validation):
 
 ```bash
 bash scripts/run_paper_pipeline.sh
-```
-
-If TTA prediction artifacts already exist locally:
-
-```bash
+# if TTA artifacts already exist:
 SKIP_TTA=1 bash scripts/run_paper_pipeline.sh
 ```
 
-Run converged multi-seed training and downstream analysis:
+**Per converged seed** (after that seed’s TTA export):
 
 ```bash
-bash scripts/run_converged_seeds.sh
 bash scripts/run_seed_downstream.sh 123
 ```
 
-See [`scripts/README.md`](scripts/README.md) for step-by-step commands and expected outputs.
+Stage order inside the chain:
+
+| Stage | What it does | Typical output |
+|---|---|---|
+| Failure table | Dice / failure labels from TTA masks | `failure_tables/failure_metrics.csv` |
+| Layer embeddings | Pooled activations at 9 U-Net stages | `layer_embeddings/` |
+| Confidence | GT-free confidence summaries (prefers saved TTA probs when configured) | `case_level_confidence_features.csv` |
+| Consistency | Representation–output gap features | `consistency/` |
+| Triage | Nested CV: confidence vs confidence+consistency | `confidence_consistency_triage*/` |
+| Validation | Bootstrap CIs, ablations, figures | `method_validation/`, `seed_analysis_summary.md` |
+
+Individual stages can also be run via the `scripts/run_*.py` CLIs listed in [`scripts/README.md`](scripts/README.md).
+
+### 4. Inspect results without retraining
+
+Committed manuscript tables and figures are under [`results/paper/`](results/paper/README.md). You can read those without BraTS volumes or GPUs. Regenerating numbers requires local data, checkpoints, and the commands above.
+
+### 5. External cohorts (not wired yet)
+
+Public sets such as [UCSF-PDGM](https://www.cancerimagingarchive.net/collection/ucsf-pdgm/) and [UPENN-GBM](https://www.cancerimagingarchive.net/collection/upenn-gbm/) are suitable **candidates for frozen external testing** (same four structural contrasts + BraTS-style segs), but this repo’s loader currently expects the BraTS 2021 directory naming. Using them would need an I/O adapter and **strict de-duplication** against BraTS 2021 IDs before claiming an external test.
 
 ---
 
